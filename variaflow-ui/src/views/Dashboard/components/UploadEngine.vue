@@ -24,12 +24,6 @@
           class="flex min-h-[188px] w-full flex-col items-center justify-center px-6 pb-10 pt-16 text-center md:min-h-[194px]"
         >
           <div class="mb-3 flex items-center justify-center gap-3">
-            <div
-              class="flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-700"
-            >
-              <el-icon class="text-[15px]"><UploadFilled /></el-icon>
-            </div>
-
             <h3 class="m-0 text-[16px] font-bold tracking-[0.01em] text-gray-900">
               ZIP 文件拖拽至此，自动启动解析与调度
             </h3>
