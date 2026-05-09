@@ -1,0 +1,65 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+  --vf-bg: #f4f5f7;
+  --vf-card: #ffffff;
+  --vf-soft: #fafafa;
+  --vf-text: #18181b;
+  --vf-muted: #52525b;
+  --vf-subtle: #a1a1aa;
+  --vf-border: #e4e4e7;
+  --vf-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+html,
+body,
+#app {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at top left, rgba(255, 255, 255, 0.92), transparent 26%),
+    linear-gradient(180deg, #fafafa 0%, #f4f5f7 100%);
+  color: var(--vf-text);
+  font-family:
+    Inter,
+    "PingFang SC",
+    "HarmonyOS Sans SC",
+    "Microsoft YaHei UI",
+    "Segoe UI",
+    sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+a {
+  color: inherit;
+}
+
+.el-pager li,
+.el-pagination button {
+  border-radius: 8px !important;
+}
+
+.el-button {
+  border-radius: 10px !important;
+}
+
+.el-radio-button__inner {
+  border-radius: 10px !important;
+}
