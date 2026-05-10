@@ -9,8 +9,27 @@
           <el-tooltip
             effect="dark"
             placement="top"
-            :content="intentReason || intentLabel"
+            popper-class="task-intent-tooltip"
           >
+            <template #content>
+              <div class="max-w-[280px] space-y-1.5 text-[12px] leading-5">
+                <div class="font-semibold text-white">{{ intentLabel }}</div>
+                <div v-if="intentReason" class="whitespace-normal break-words text-slate-100">
+                  {{ intentReason }}
+                </div>
+                <div
+                  v-if="subjectFeatures"
+                  class="rounded-md border border-white/10 bg-white/5 px-2 py-1.5 text-slate-100"
+                >
+                  <div class="mb-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-300">
+                    Subject Features
+                  </div>
+                  <div class="whitespace-normal break-words leading-5">
+                    {{ subjectFeatures }}
+                  </div>
+                </div>
+              </div>
+            </template>
             <span
               class="inline-flex items-center rounded-full px-2 py-[2px] text-[10px] font-semibold"
               :class="intentTagClass"
@@ -144,6 +163,7 @@ const displayTitle = computed(() => props.task.source_name || `SKU_${sourceIndex
 const primarySlot = computed(() => (props.task.generation_tasks || [])[0] || null);
 const intentLabel = computed(() => primarySlot.value?.intent_label || primarySlot.value?.intent || "");
 const intentReason = computed(() => primarySlot.value?.intent_reason || "");
+const subjectFeatures = computed(() => primarySlot.value?.subject_features || "");
 const intentTagClass = computed(() => {
   const intent = primarySlot.value?.intent;
   if (intent === "POSE_VARIATION") {
