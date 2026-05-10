@@ -1,7 +1,25 @@
 <template>
-  <article class="rounded-xl border border-gray-100 bg-white p-3.5 shadow-[0_2px_8px_-4px_rgba(0,0,0,0.05)] transition-shadow hover:shadow-md">
-    <div class="mb-3 flex items-center justify-between">
-      <span class="truncate text-[13px] font-semibold text-gray-900">{{ displayTitle }}</span>
+  <article
+    class="rounded-xl border border-gray-100 bg-white p-3.5 shadow-[0_2px_8px_-4px_rgba(0,0,0,0.05)] transition-shadow hover:shadow-md"
+  >
+    <div class="mb-3 flex items-start justify-between gap-3">
+      <div class="min-w-0 flex-1">
+        <div class="truncate text-[13px] font-semibold text-gray-900">{{ displayTitle }}</div>
+        <div v-if="intentLabel" class="mt-1">
+          <el-tooltip
+            effect="dark"
+            placement="top"
+            :content="intentReason || intentLabel"
+          >
+            <span
+              class="inline-flex items-center rounded-full px-2 py-[2px] text-[10px] font-semibold"
+              :class="intentTagClass"
+            >
+              {{ intentLabel }}
+            </span>
+          </el-tooltip>
+        </div>
+      </div>
       <div class="ml-2 flex shrink-0 items-center gap-1.5">
         <div class="h-1.5 w-1.5 rounded-full" :class="statusDotClass"></div>
         <span class="text-[11px] font-medium" :class="statusTextClass">{{ statusText }}</span>
@@ -56,8 +74,15 @@
             <div v-else class="flex h-full w-full items-center justify-center bg-[#FAFAFA] text-green-500">
               <el-icon><CircleCheckFilled /></el-icon>
             </div>
-            <div class="absolute bottom-0 right-0 translate-x-[20%] translate-y-[20%] rounded-full bg-white p-[1px]">
-              <div class="flex h-3.5 w-3.5 items-center justify-center rounded-full bg-green-500"></div>
+
+            <div class="absolute inset-x-1 bottom-1 flex items-center justify-between">
+              <div class="h-3.5 w-3.5 rounded-full border border-white bg-green-500"></div>
+              <span
+                v-if="slot.status === 'fallback_success'"
+                class="rounded bg-amber-500/90 px-1 py-[1px] text-[9px] font-semibold text-white"
+              >
+                Wanx
+              </span>
             </div>
           </template>
 
@@ -68,14 +93,20 @@
           </template>
 
           <template v-else-if="slot.status === 'failed'">
-            <button
-              type="button"
-              class="flex h-full w-full flex-col items-center justify-center gap-0.5 bg-red-50/50 text-red-500 transition-colors hover:bg-red-50"
-              @click="$emit('retry-slot', slot)"
+            <el-tooltip
+              effect="dark"
+              placement="top"
+              :content="slot.last_error_message || slot.last_error_code || '任务执行失败，请重试'"
             >
-              <el-icon><WarningFilled /></el-icon>
-              <span class="text-[10px] font-medium leading-none">重试</span>
-            </button>
+              <button
+                type="button"
+                class="flex h-full w-full flex-col items-center justify-center gap-0.5 bg-red-50/50 text-red-500 transition-colors hover:bg-red-50"
+                @click="$emit('retry-slot', slot)"
+              >
+                <el-icon><WarningFilled /></el-icon>
+                <span class="text-[10px] font-medium leading-none">重试</span>
+              </button>
+            </el-tooltip>
           </template>
 
           <template v-else>
@@ -110,13 +141,26 @@ defineEmits(["retry-slot"]);
 const sourcePreviewUrl = computed(() => resolvePreviewUrl(props.task.normalized_path || props.task.source_path));
 const sourceIndexLabel = computed(() => String(props.task.source_index || 0).padStart(3, "0"));
 const displayTitle = computed(() => props.task.source_name || `SKU_${sourceIndexLabel.value}.jpg`);
+const primarySlot = computed(() => (props.task.generation_tasks || [])[0] || null);
+const intentLabel = computed(() => primarySlot.value?.intent_label || primarySlot.value?.intent || "");
+const intentReason = computed(() => primarySlot.value?.intent_reason || "");
+const intentTagClass = computed(() => {
+  const intent = primarySlot.value?.intent;
+  if (intent === "POSE_VARIATION") {
+    return "bg-violet-50 text-violet-700 ring-1 ring-violet-200";
+  }
+  if (intent === "SCENE_EDIT") {
+    return "bg-sky-50 text-sky-700 ring-1 ring-sky-200";
+  }
+  return "bg-gray-50 text-gray-600 ring-1 ring-gray-200";
+});
 
 const statusText = computed(() => {
   if (props.task.status === "completed") {
     return "已完成";
   }
   if (props.task.status === "partial_success") {
-    return "生成中";
+    return "部分成功";
   }
   if (props.task.status === "failed") {
     return "异常失败";
@@ -131,6 +175,9 @@ const statusTextClass = computed(() => {
   if (props.task.status === "failed") {
     return "text-red-500";
   }
+  if (props.task.status === "partial_success") {
+    return "text-amber-500";
+  }
   return "text-blue-500";
 });
 
@@ -140,6 +187,9 @@ const statusDotClass = computed(() => {
   }
   if (props.task.status === "failed") {
     return "bg-red-500";
+  }
+  if (props.task.status === "partial_success") {
+    return "bg-amber-500";
   }
   return "bg-blue-500";
 });
@@ -165,14 +215,23 @@ function resolvePreviewUrl(path) {
   if (!path || typeof path !== "string") {
     return "";
   }
+
   if (
     path.startsWith("http://") ||
     path.startsWith("https://") ||
-    path.startsWith("/") ||
     path.startsWith("data:image/")
   ) {
     return path.replaceAll("\\", "/");
   }
+
+  if (path.startsWith("/static/")) {
+    return path.replaceAll("\\", "/");
+  }
+
+  if (path.startsWith("/")) {
+    return `http://127.0.0.1:8000${path.replaceAll("\\", "/")}`;
+  }
+
   return "";
 }
 
@@ -196,6 +255,9 @@ function slotClassName(slot) {
   }
   if (slot.status === "failed") {
     return "border border-red-200";
+  }
+  if (slot.status === "pending") {
+    return "border-dashed border-gray-300 bg-[#FAFAFA]";
   }
   return "border border-dashed border-gray-300 bg-[#FAFAFA]";
 }

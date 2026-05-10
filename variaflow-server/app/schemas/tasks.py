@@ -11,6 +11,9 @@ class GenerationTaskSlotResponse(BaseModel):
     id: int
     variant_index: int
     variant_axis: str
+    intent: str | None = None
+    intent_label: str | None = None
+    intent_reason: str | None = None
     status: str
     provider_final: str | None = None
     provider_route_final: str | None = None
