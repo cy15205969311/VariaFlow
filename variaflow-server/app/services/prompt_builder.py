@@ -4,6 +4,7 @@ import random
 from typing import Any
 
 from app.core.config import settings
+from app.core.prompt_lexicon import CAMERA_TERMS, LIGHTING_TERMS, QUALITY_TERMS, RENDER_TERMS
 from app.models.tasks import BatchPromptConfig, GenerationTask, PromptProfile, PromptVariableOption, SourceTask
 
 DEFAULT_POSITIVE_TEMPLATE = (
@@ -60,6 +61,16 @@ POSE_VARIATION_ACTION_LIBRARY = [
     "stand confidently with one hand on the hip while wearing a sporty varsity jacket",
     "lean forward in a playful commercial pose while wearing a trendy streetwear windbreaker",
 ]
+
+
+def _build_magic_enhancers() -> str:
+    enhancer_terms = [
+        *QUALITY_TERMS,
+        *LIGHTING_TERMS,
+        *CAMERA_TERMS,
+        *RENDER_TERMS,
+    ]
+    return ", ".join(term for term in enhancer_terms if str(term).strip())
 
 
 def _choose_slot_value(values: list[str], slot_seed: int) -> str:
@@ -184,6 +195,7 @@ def _build_pose_variation_prompt(
     camera_clause = fragments.get("camera_fragment", "").strip()
     quality_clause = quality_template.strip()
     style_tail = ", ".join(part for part in [camera_clause, fragments.get("style_fragment", "").strip(), quality_clause] if part)
+    enhancers = _build_magic_enhancers()
     return (
         "Create a masterpiece, ultra-high definition image of the exact same IP character in a new pose. "
         f"Must strictly adhere to this exact artistic style and lighting: [{style_clause}]. "
@@ -193,7 +205,9 @@ def _build_pose_variation_prompt(
         "Preserve the same premium 3D blind-box quality, facial appeal, material richness, and overall charm. "
         "Do not create a different character. Do not drift into a generic monkey. "
         f"ACTION & OUTFIT MODIFICATION: The character is now doing the following action and wearing this outfit: {action_required}. "
-        f"Ensure the result feels like the exact same IP in a new pose. {style_tail}"
+        f"Ensure the result feels like the exact same IP in a new pose. "
+        f"COMMERCIAL PHOTOGRAPHY REQUIREMENTS: {enhancers}. "
+        f"{style_tail}"
     ).strip()
 
 

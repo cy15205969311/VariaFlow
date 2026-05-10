@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import app.core.config as config_module
 from app.core.config import _normalize_openai_image_edit_url
 from app.core.config import _normalize_openai_image_generation_url
+from app.core.prompt_lexicon import CAMERA_TERMS, LIGHTING_TERMS, QUALITY_TERMS, RENDER_TERMS
 from app.services.prompt_builder import build_provider_payload
 
 
@@ -113,9 +114,12 @@ def test_build_provider_payload_switches_prompt_for_pose_variation() -> None:
     assert "The main character must exactly match this physical description and identity" in payload["prompt"]
     assert "ACTION & OUTFIT MODIFICATION:" in payload["prompt"]
     assert "Ensure the result feels like the exact same IP in a new pose." in payload["prompt"]
+    assert "COMMERCIAL PHOTOGRAPHY REQUIREMENTS:" in payload["prompt"]
     assert "3D chibi cartoon monkey, large brown eyes, fluffy light brown fur" in payload["prompt"]
     assert "polished 3D blind-box render, glossy toy material" in payload["prompt"]
     assert "soft warm indoor studio gradient background" in payload["prompt"]
+    for term in [QUALITY_TERMS[0], LIGHTING_TERMS[0], CAMERA_TERMS[0], RENDER_TERMS[0]]:
+        assert term in payload["prompt"]
 
 def test_default_aliyun_imageedit_strength_is_high_enough_for_pose_variation() -> None:
     assert config_module.settings.aliyun_imageedit_strength == 0.85
