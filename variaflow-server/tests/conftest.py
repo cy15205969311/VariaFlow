@@ -79,7 +79,7 @@ def event_loop() -> AsyncIterator[asyncio.AbstractEventLoop]:
         loop.close()
 
 
-@pytest_asyncio.fixture(scope="session", autouse=True)
+@pytest_asyncio.fixture(scope="session")
 async def prepare_test_schema() -> AsyncIterator[None]:
     # 显式导入模型模块，确保 Base.metadata 已完整注册所有表结构。
     import app.models.tasks  # noqa: F401

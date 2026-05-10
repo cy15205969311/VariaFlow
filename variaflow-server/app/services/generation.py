@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 import os
 from datetime import datetime
 from pathlib import Path
@@ -10,6 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.enums import AttemptOutcome, ProviderRoute, QCStatus, TaskStatus
 from app.models.tasks import GenerationAttempt, GenerationTask
+
+logger = logging.getLogger(__name__)
 
 
 def _sha256_bytes(payload: bytes) -> str:
@@ -68,6 +71,13 @@ async def finalize_generation_task(
     # 在同一文件系统内，os.replace 具备原子性。
     # 这里是“不完整临时文件”切换为“最终可见产物”的关键交接点。
     await asyncio.to_thread(os.replace, resolved_temp_path, final_output_path)
+    logger.info(
+        "Generation output saved task_id=%s path=%s bytes=%s provider_route=%s",
+        task.id,
+        final_output_path,
+        output_size_bytes,
+        provider_route.value,
+    )
 
     task.status = TaskStatus.FALLBACK_SUCCESS if provider_route == ProviderRoute.FALLBACK else TaskStatus.SUCCESS
     task.provider_route_final = provider_route

@@ -4,7 +4,17 @@ import random
 from typing import Any
 
 from app.core.config import settings
-from app.core.prompt_lexicon import CAMERA_TERMS, LIGHTING_TERMS, QUALITY_TERMS, RENDER_TERMS
+from app.core.prompt_lexicon import (
+    CAMERA_TERMS,
+    ENVIRONMENT_TEMPLATES,
+    LIGHTING_TERMS,
+    NEGATIVE_SPACE_COMPOSITION_RULE,
+    QUALITY_TERMS,
+    RENDER_TERMS,
+    SCENE_RECIPE_FALLBACKS,
+    SCENE_RECIPES,
+    SPATIAL_GROUNDING_PROMPTS,
+)
 from app.models.tasks import BatchPromptConfig, GenerationTask, PromptProfile, PromptVariableOption, SourceTask
 
 DEFAULT_POSITIVE_TEMPLATE = (
@@ -71,6 +81,15 @@ def _build_magic_enhancers() -> str:
         *RENDER_TERMS,
     ]
     return ", ".join(term for term in enhancer_terms if str(term).strip())
+
+
+def _normalize_scene_text(raw: str | None) -> str:
+    return " ".join(str(raw or "").split()).strip()
+
+
+def _normalize_scene_recipe_key(raw: str | None) -> str:
+    value = _normalize_scene_text(raw).lower()
+    return value if value in SCENE_RECIPES else ""
 
 
 def _choose_slot_value(values: list[str], slot_seed: int) -> str:
@@ -194,7 +213,11 @@ def _build_pose_variation_prompt(
     )
     camera_clause = fragments.get("camera_fragment", "").strip()
     quality_clause = quality_template.strip()
-    style_tail = ", ".join(part for part in [camera_clause, fragments.get("style_fragment", "").strip(), quality_clause] if part)
+    style_tail = ", ".join(
+        part
+        for part in [camera_clause, fragments.get("style_fragment", "").strip(), quality_clause]
+        if part
+    )
     enhancers = _build_magic_enhancers()
     return (
         "Create a masterpiece, ultra-high definition image of the exact same IP character in a new pose. "
@@ -211,6 +234,77 @@ def _build_pose_variation_prompt(
     ).strip()
 
 
+def _build_scene_edit_prompt(
+    *,
+    positive_template: str,
+    identity_lock: str,
+    scene_variant_directive: str,
+    fragments: dict[str, str],
+    quality_template: str,
+    sku_category: str,
+    scene_recipe_key: str,
+    scene_environment: str,
+) -> str:
+    grounding_prompt = SPATIAL_GROUNDING_PROMPTS.get(
+        sku_category,
+        SPATIAL_GROUNDING_PROMPTS["other_flat"],
+    )
+    base_prompt = (
+        positive_template
+        .replace("{{identity_lock}}", identity_lock)
+        .replace("{{variant_directive}}", scene_variant_directive)
+    )
+    return ", ".join(
+        fragment
+        for fragment in [
+            f"CRITICAL GROUNDING: {grounding_prompt}.",
+            f"VIRAL SCENE RECIPE: {scene_recipe_key}.",
+            f"ENVIRONMENT & BACKGROUND: {scene_environment}.",
+            "Ensure realistic drop shadows, believable surface contact, and seamless commercial integration.",
+            NEGATIVE_SPACE_COMPOSITION_RULE,
+            base_prompt,
+            fragments["camera_fragment"],
+            fragments["style_fragment"],
+            quality_template,
+        ]
+        if fragment
+    )
+
+
+def _resolve_scene_environment(
+    *,
+    suggested_scene: str | None,
+    sku_category: str,
+    source_task: SourceTask,
+    generation_task: GenerationTask,
+) -> tuple[str, str]:
+    normalized_recipe_key = _normalize_scene_recipe_key(suggested_scene)
+    if normalized_recipe_key:
+        return normalized_recipe_key, SCENE_RECIPES[normalized_recipe_key]
+
+    recipe_options = SCENE_RECIPE_FALLBACKS.get(
+        sku_category,
+        SCENE_RECIPE_FALLBACKS["other_flat"],
+    )
+    seed_value = generation_task.variant_index + sum(ord(char) for char in (source_task.source_hash or ""))
+    fallback_recipe_key = recipe_options[seed_value % len(recipe_options)]
+    return fallback_recipe_key, SCENE_RECIPES[fallback_recipe_key]
+
+
+def _resolve_scene_supporting_environment(
+    *,
+    sku_category: str,
+    source_task: SourceTask,
+    generation_task: GenerationTask,
+) -> str:
+    options = ENVIRONMENT_TEMPLATES.get(
+        sku_category,
+        ENVIRONMENT_TEMPLATES["other_flat"],
+    )
+    seed_value = generation_task.variant_index + sum(ord(char) for char in (source_task.source_hash or ""))
+    return options[seed_value % len(options)]
+
+
 def build_provider_payload(
     source_task: SourceTask,
     generation_task: GenerationTask,
@@ -221,6 +315,8 @@ def build_provider_payload(
     subject_features: str | None = None,
     style_features: str | None = None,
     background_features: str | None = None,
+    sku_category: str | None = None,
+    suggested_scene: str | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """
     组装发往模型网关的标准化载荷，并同时返回一份可落库审计的快照。
@@ -270,6 +366,22 @@ def build_provider_payload(
     )
 
     normalized_intent = str(intent or "SCENE_EDIT").strip().upper()
+    normalized_sku_category = str(sku_category or "other_flat").strip().lower() or "other_flat"
+    resolved_scene_recipe_key, resolved_scene_recipe = _resolve_scene_environment(
+        suggested_scene=suggested_scene,
+        sku_category=normalized_sku_category,
+        source_task=source_task,
+        generation_task=generation_task,
+    )
+    resolved_supporting_environment = _resolve_scene_supporting_environment(
+        sku_category=normalized_sku_category,
+        source_task=source_task,
+        generation_task=generation_task,
+    )
+    resolved_scene_environment = (
+        f"{resolved_scene_recipe} Supporting surface and lighting continuity: {resolved_supporting_environment}"
+    )
+    scene_variant_directive = f"in the following background environment: {resolved_scene_environment}"
     if normalized_intent == "POSE_VARIATION":
         final_prompt = _build_pose_variation_prompt(
             identity_lock=identity_lock,
@@ -280,25 +392,23 @@ def build_provider_payload(
             background_features=background_features,
         )
     else:
-        final_prompt = (
-            positive_template
-            .replace("{{identity_lock}}", identity_lock)
-            .replace("{{variant_directive}}", variant_directive)
-        )
-        final_prompt = ", ".join(
-            fragment
-            for fragment in [
-                final_prompt,
-                fragments["camera_fragment"],
-                fragments["style_fragment"],
-                quality_template,
-            ]
-            if fragment
+        final_prompt = _build_scene_edit_prompt(
+            positive_template=positive_template,
+            identity_lock=identity_lock,
+            scene_variant_directive=scene_variant_directive,
+            fragments=fragments,
+            quality_template=quality_template,
+            sku_category=normalized_sku_category,
+            scene_recipe_key=resolved_scene_recipe_key,
+            scene_environment=resolved_scene_environment,
         )
 
     prompt_snapshot = {
         "intent": normalized_intent,
         "intent_reason": intent_reason,
+        "sku_category": normalized_sku_category,
+        "suggested_scene": resolved_scene_recipe_key if normalized_intent == "SCENE_EDIT" else "",
+        "suggested_scene_prompt": resolved_scene_environment if normalized_intent == "SCENE_EDIT" else "",
         "subject_features": subject_features if normalized_intent == "POSE_VARIATION" else "",
         "style_features": style_features if normalized_intent == "POSE_VARIATION" else "",
         "background_features": background_features if normalized_intent == "POSE_VARIATION" else "",
@@ -307,7 +417,7 @@ def build_provider_payload(
         "negative_template": negative_template,
         "quality_template": quality_template,
         "variant_axis": axis,
-        "variant_directive": variant_directive,
+        "variant_directive": scene_variant_directive if normalized_intent == "SCENE_EDIT" else variant_directive,
         **fragments,
     }
 
@@ -319,6 +429,9 @@ def build_provider_payload(
         "openai_model": settings.openai_image_model,
         "aliyun_model": settings.aliyun_wanx_model,
         "intent": normalized_intent,
+        "sku_category": normalized_sku_category,
+        "suggested_scene": resolved_scene_recipe_key if normalized_intent == "SCENE_EDIT" else "",
+        "suggested_scene_prompt": resolved_scene_environment if normalized_intent == "SCENE_EDIT" else "",
         "subject_features": subject_features if normalized_intent == "POSE_VARIATION" else "",
         "style_features": style_features if normalized_intent == "POSE_VARIATION" else "",
         "background_features": background_features if normalized_intent == "POSE_VARIATION" else "",
@@ -334,6 +447,7 @@ def build_provider_payload(
         "batch_code": source_task.batch.batch_code if source_task.batch else None,
         "source_task_id": source_task.id,
         "generation_task_id": generation_task.id,
+        "original_source_image_path": source_task.source_path,
         "source_hash": source_task.source_hash,
         "variant_index": generation_task.variant_index,
         "variant_axis": axis,

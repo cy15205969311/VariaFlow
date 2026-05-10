@@ -6,6 +6,7 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.models.enums import TaskStatus
 from app.models.tasks import GenerationTask
 
@@ -25,8 +26,11 @@ async def recover_expired_tasks(session: AsyncSession) -> int:
         .where(GenerationTask.status == TaskStatus.PROCESSING)
         .where(GenerationTask.lease_until.is_not(None))
         .where(GenerationTask.lease_until < now)
-        .with_for_update(skip_locked=True)
     )
+    if settings.db_supports_skip_locked:
+        statement = statement.with_for_update(skip_locked=True)
+    else:
+        statement = statement.with_for_update()
 
     result = await session.execute(statement)
     expired_tasks = result.scalars().all()

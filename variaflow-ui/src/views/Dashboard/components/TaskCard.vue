@@ -1,8 +1,9 @@
 <template>
   <article
-    class="rounded-xl border border-gray-100 bg-white p-3.5 shadow-[0_2px_8px_-4px_rgba(0,0,0,0.05)] transition-shadow hover:shadow-md"
+    class="rounded-xl border border-gray-100 bg-white shadow-[0_2px_8px_-4px_rgba(0,0,0,0.05)] transition-shadow hover:shadow-md"
+    :class="compact ? 'p-3' : 'p-3.5'"
   >
-    <div class="mb-3 flex items-start justify-between gap-3">
+    <div class="flex items-start justify-between gap-3" :class="compact ? 'mb-2.5' : 'mb-3'">
       <div class="min-w-0 flex-1">
         <div class="truncate text-[13px] font-semibold text-gray-900">{{ displayTitle }}</div>
         <div v-if="intentLabel" class="mt-1">
@@ -45,8 +46,11 @@
       </div>
     </div>
 
-    <div class="flex gap-2">
-      <div class="h-[60px] w-[60px] shrink-0 overflow-hidden rounded border border-gray-100 bg-[#F3F4F6] shadow-inner">
+    <div class="flex gap-2" :class="compact ? 'items-start' : ''">
+      <div
+        class="shrink-0 overflow-hidden rounded border border-gray-100 bg-[#F3F4F6] shadow-inner"
+        :class="compact ? 'h-[56px] w-[56px]' : 'h-[60px] w-[60px]'"
+      >
         <el-image
           v-if="sourcePreviewUrl"
           :src="sourcePreviewUrl"
@@ -68,8 +72,8 @@
         <div
           v-for="slot in paddedGenerationTasks"
           :key="slot.key"
-          class="relative h-[60px] w-[60px] shrink-0 overflow-hidden rounded border"
-          :class="slotClassName(slot)"
+          class="relative shrink-0 overflow-hidden rounded border"
+          :class="[compact ? 'h-[56px] w-[56px]' : 'h-[60px] w-[60px]', slotClassName(slot)]"
         >
           <template v-if="slot.isEmpty">
             <div class="flex h-full w-full items-center justify-center bg-[#FAFAFA] text-gray-300">
@@ -152,6 +156,10 @@ const props = defineProps({
   task: {
     type: Object,
     required: true,
+  },
+  compact: {
+    type: Boolean,
+    default: false,
   },
 });
 

@@ -38,6 +38,7 @@ def run_rules_qc(
     min_size: int,
     min_width: int,
     min_height: int,
+    min_total_pixels: int = 0,
     allowed_mime_types: set[str] | None = None,
 ) -> QualityCheckResult:
     """
@@ -59,9 +60,7 @@ def run_rules_qc(
         fail_codes.append("file_too_small")
 
     mime_type, _ = mimetypes.guess_type(path.name)
-    mime_type_ok = mime_type in allowed_types
-    if not mime_type_ok:
-        fail_codes.append("unsupported_mime_type")
+    mime_type_ok = False
 
     width: int | None = None
     height: int | None = None
@@ -76,13 +75,20 @@ def run_rules_qc(
         if actual_mime_type:
             mime_type = actual_mime_type
         mime_type_ok = mime_type in allowed_types
-        if not mime_type_ok and "unsupported_mime_type" not in fail_codes:
-            fail_codes.append("unsupported_mime_type")
-        resolution_ok = bool(width and height and width >= min_width and height >= min_height)
+        resolution_ok = bool(width and height)
+        if resolution_ok and min_width > 0:
+            resolution_ok = bool(width and width >= min_width)
+        if resolution_ok and min_height > 0:
+            resolution_ok = bool(height and height >= min_height)
+        if resolution_ok and min_total_pixels > 0:
+            resolution_ok = bool(width and height and (width * height) >= min_total_pixels)
         if not resolution_ok:
             fail_codes.append("resolution_too_small")
     except (UnidentifiedImageError, OSError):
         fail_codes.append("invalid_image")
+
+    if not mime_type_ok:
+        fail_codes.append("unsupported_mime_type")
 
     verdict = "passed" if not fail_codes else "failed"
     return QualityCheckResult(
@@ -108,5 +114,6 @@ def run_rules_only_qc(file_path: str, config: dict[str, Any]) -> QualityCheckRes
         min_size=int(config.get("min_file_size_bytes", 51_200)),
         min_width=int(config.get("min_width", 1024)),
         min_height=int(config.get("min_height", 1024)),
+        min_total_pixels=int(config.get("min_total_pixels", 900_000)),
         allowed_mime_types=set(config.get("allowed_mime_types", {"image/png", "image/jpeg", "image/webp"})),
     )

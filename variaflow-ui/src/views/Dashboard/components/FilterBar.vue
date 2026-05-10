@@ -1,51 +1,46 @@
 <template>
-  <section class="flex flex-col gap-4 border-b border-gray-200 px-4 py-4 md:flex-row md:items-center md:justify-between md:px-[18px] md:pb-[14px]">
-    <div class="flex items-center gap-3">
-      <h3 class="m-0 text-[15px] font-bold text-gray-900">任务列表</h3>
-      <span class="text-[13px] text-gray-400">共 {{ total }} 个任务</span>
+  <section class="filter-bar">
+    <div class="filter-bar__summary">
+      <h3 class="filter-bar__title">任务列表</h3>
+      <span class="filter-bar__meta">共 {{ total }} 个任务</span>
     </div>
 
-    <div class="flex flex-wrap items-center gap-3">
-      <button class="flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-3 py-1.5 text-[12px] font-medium text-gray-600 shadow-sm transition-colors hover:bg-gray-50">
-        <el-icon class="text-gray-400"><Grid /></el-icon>
-        紧凑视图
+    <div class="filter-bar__actions">
+      <button
+        type="button"
+        class="filter-bar__button"
+        :class="{ 'filter-bar__button--active': compact }"
+        @click="emit('update:compact', !compact)"
+      >
+        <el-icon><Grid /></el-icon>
+        <span>紧凑视图</span>
       </button>
 
-      <el-radio-group
+      <el-select
         :model-value="modelValue"
-        class="filter-bar__radios"
-        @update:model-value="handleFilterChange"
+        class="filter-bar__select"
+        placeholder="全部状态"
+        @update:model-value="(value) => emit('update:modelValue', value)"
       >
-        <el-radio-button
+        <el-option
           v-for="option in options"
           :key="option.value"
-          :label="option.value"
-        >
-          {{ option.label }}
-        </el-radio-button>
-      </el-radio-group>
-
-      <div class="relative">
-        <el-icon class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-300"><Search /></el-icon>
-        <input
-          type="text"
-          placeholder="搜索文件名"
-          class="w-[180px] rounded-md border border-gray-200 bg-white py-1.5 pl-9 pr-4 text-[12px] text-gray-700 outline-none transition-all placeholder:text-gray-400 focus:border-gray-400 focus:ring-1 focus:ring-gray-200"
+          :label="option.label"
+          :value="option.value"
         />
-      </div>
+      </el-select>
 
-      <div class="flex items-center gap-3">
-        <el-switch
-          :model-value="autoRefresh"
-          inline-prompt
-          active-text="自动"
-          inactive-text="手动"
-          @change="handleAutoRefreshChange"
-        />
-        <el-button type="primary" plain :loading="loading" @click="$emit('refresh')">
-          刷新
-        </el-button>
-      </div>
+      <el-input
+        :model-value="searchKeyword"
+        class="filter-bar__search"
+        clearable
+        placeholder="搜索文件名"
+        @update:model-value="(value) => emit('update:searchKeyword', value || '')"
+      >
+        <template #prefix>
+          <el-icon><Search /></el-icon>
+        </template>
+      </el-input>
     </div>
   </section>
 </template>
@@ -58,25 +53,21 @@ defineProps({
     type: String,
     default: "all",
   },
-  autoRefresh: {
-    type: Boolean,
-    default: true,
-  },
-  loading: {
+  compact: {
     type: Boolean,
     default: false,
+  },
+  searchKeyword: {
+    type: String,
+    default: "",
   },
   total: {
     type: Number,
     default: 0,
   },
-  visibleTotal: {
-    type: Number,
-    default: 0,
-  },
 });
 
-const emit = defineEmits(["update:modelValue", "update:autoRefresh", "refresh"]);
+const emit = defineEmits(["update:modelValue", "update:compact", "update:searchKeyword"]);
 
 const options = [
   { label: "全部状态", value: "all" },
@@ -84,22 +75,124 @@ const options = [
   { label: "成功", value: "success" },
   { label: "异常失败", value: "failed" },
 ];
-
-function handleFilterChange(value) {
-  emit("update:modelValue", value);
-}
-
-function handleAutoRefreshChange(value) {
-  emit("update:autoRefresh", value);
-}
 </script>
 
 <style scoped>
-.filter-bar__radios :deep(.el-radio-button__inner) {
-  min-width: 84px;
-  min-height: 34px;
+.filter-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid #e5e7eb;
+  padding: 16px 18px 14px;
+}
+
+.filter-bar__summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.filter-bar__title {
+  margin: 0;
+  color: #111827;
+  font-size: 15px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.filter-bar__meta {
+  color: #9ca3af;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.filter-bar__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.filter-bar__button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  border: 1px solid #e5e7eb;
   border-radius: 10px;
-  box-shadow: none;
-  font-size: 12px;
+  background: #ffffff;
+  padding: 0 14px;
+  color: #4b5563;
+  font-size: 13px;
+  font-weight: 500;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  transition: all 0.18s ease;
+}
+
+.filter-bar__button:hover {
+  background: #f9fafb;
+}
+
+.filter-bar__button--active {
+  border-color: #bfdbfe;
+  background: rgba(239, 246, 255, 0.9);
+  color: #2563eb;
+}
+
+.filter-bar__select {
+  width: 120px;
+}
+
+.filter-bar__search {
+  width: 200px;
+}
+
+.filter-bar__select :deep(.el-input__wrapper),
+.filter-bar__search :deep(.el-input__wrapper) {
+  min-height: 36px;
+  border-radius: 10px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.filter-bar__search :deep(.el-input__prefix) {
+  color: #9ca3af;
+}
+
+@media (max-width: 960px) {
+  .filter-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .filter-bar__summary {
+    justify-content: space-between;
+  }
+
+  .filter-bar__actions {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 640px) {
+  .filter-bar {
+    padding: 14px 14px 12px;
+  }
+
+  .filter-bar__summary {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .filter-bar__actions {
+    gap: 12px;
+  }
+
+  .filter-bar__select,
+  .filter-bar__search {
+    width: 100%;
+  }
 }
 </style>

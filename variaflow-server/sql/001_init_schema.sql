@@ -54,7 +54,7 @@ CREATE TABLE IF NOT EXISTS `batch_job` (
   KEY `idx_batch_job_status_created_at` (`status`, `created_at`),
   KEY `idx_batch_job_export_status` (`export_status`, `updated_at`),
   CONSTRAINT `chk_batch_job_target_variant_count`
-    CHECK (`target_variant_count` BETWEEN 2 AND 3)
+    CHECK (`target_variant_count` BETWEEN 1 AND 3)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE IF NOT EXISTS `prompt_profile` (
@@ -152,7 +152,7 @@ CREATE TABLE IF NOT EXISTS `source_task` (
     FOREIGN KEY (`batch_id`) REFERENCES `batch_job` (`id`)
     ON DELETE CASCADE,
   CONSTRAINT `chk_source_task_target_variant_count`
-    CHECK (`target_variant_count` BETWEEN 2 AND 3)
+    CHECK (`target_variant_count` BETWEEN 1 AND 3)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE IF NOT EXISTS `generation_task` (

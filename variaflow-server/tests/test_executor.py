@@ -23,8 +23,12 @@ def _build_http_status_error(status_code: int, url: str, message: str) -> httpx.
 async def test_happy_path(monkeypatch: pytest.MonkeyPatch, mock_batch_data: dict[str, object]) -> None:
     session_factory = mock_batch_data["session_factory"]
 
-    async def _always_success(payload_json: dict, provider_route: ProviderRoute = ProviderRoute.PRIMARY) -> tuple[bytes, dict]:
-        del payload_json
+    async def _always_success(
+        payload_json: dict,
+        provider_route: ProviderRoute = ProviderRoute.PRIMARY,
+        source_image_bytes: bytes | None = None,
+    ) -> tuple[bytes, dict]:
+        del payload_json, source_image_bytes
         adapter = ai_provider.MockAIAdapter(provider_route)
         result = await adapter.generate(client=None, payload_json={})
         return result.image_bytes, result.meta
@@ -69,8 +73,9 @@ async def test_fallback_path(monkeypatch: pytest.MonkeyPatch, mock_batch_data: d
     async def _primary_timeout_then_fallback_success(
         payload_json: dict,
         provider_route: ProviderRoute = ProviderRoute.PRIMARY,
+        source_image_bytes: bytes | None = None,
     ) -> tuple[bytes, dict]:
-        del payload_json
+        del payload_json, source_image_bytes
         if provider_route == ProviderRoute.PRIMARY:
             adapter = ai_provider.MockAIAdapter(ProviderRoute.FALLBACK)
             result = await adapter.generate(client=None, payload_json={})
@@ -117,8 +122,12 @@ async def test_fallback_path(monkeypatch: pytest.MonkeyPatch, mock_batch_data: d
 async def test_dead_letter_path(monkeypatch: pytest.MonkeyPatch, mock_batch_data: dict[str, object]) -> None:
     session_factory = mock_batch_data["session_factory"]
 
-    async def _always_fail(payload_json: dict, provider_route: ProviderRoute = ProviderRoute.PRIMARY) -> tuple[bytes, dict]:
-        del payload_json, provider_route
+    async def _always_fail(
+        payload_json: dict,
+        provider_route: ProviderRoute = ProviderRoute.PRIMARY,
+        source_image_bytes: bytes | None = None,
+    ) -> tuple[bytes, dict]:
+        del payload_json, provider_route, source_image_bytes
         raise _build_http_status_error(502, "mock://dead-letter", "all providers failed")
 
     monkeypatch.setattr(ai_provider, "call_ai_provider", _always_fail)
@@ -159,3 +168,66 @@ async def test_dead_letter_path(monkeypatch: pytest.MonkeyPatch, mock_batch_data
     assert generation_task.attempt_count >= generation_task.max_attempts
     assert attempts
     assert attempts[-1].error_code is not None
+
+
+@pytest.mark.asyncio
+async def test_scene_edit_uses_transparent_preprocessing_for_openai_edit(
+    monkeypatch: pytest.MonkeyPatch,
+    mock_batch_data: dict[str, object],
+) -> None:
+    session_factory = mock_batch_data["session_factory"]
+    captured_payloads: list[dict] = []
+    generated_path_holder: dict[str, Path] = {}
+
+    async def _always_success(
+        payload_json: dict,
+        provider_route: ProviderRoute = ProviderRoute.PRIMARY,
+        source_image_bytes: bytes | None = None,
+    ) -> tuple[bytes, dict]:
+        assert provider_route == ProviderRoute.PRIMARY
+        assert source_image_bytes is not None
+        captured_payloads.append(dict(payload_json))
+        adapter = ai_provider.MockAIAdapter(provider_route)
+        result = await adapter.generate(client=None, payload_json={})
+        return result.image_bytes, result.meta
+
+    async def _fake_analyze_image_intent(*, image_bytes: bytes, source_image_name: str):
+        del image_bytes, source_image_name
+        from app.services.vision_router import VisionRouteDecision
+
+        return VisionRouteDecision(
+            intent="SCENE_EDIT",
+            reason="standard_product",
+            raw_text='{"intent":"SCENE_EDIT"}',
+            sku_category="apparel_flat",
+            suggested_scene="soft ivory editorial backdrop with diffused daylight",
+        )
+
+    def _fake_ensure_transparent_background(image_path, temp_root):
+        source_path = Path(image_path)
+        generated_path = Path(temp_root) / "converted.png"
+        generated_path.parent.mkdir(parents=True, exist_ok=True)
+        generated_path.write_bytes(source_path.read_bytes())
+        generated_path_holder["path"] = generated_path
+        return generated_path
+
+    monkeypatch.setattr(ai_provider, "call_ai_provider", _always_success)
+    monkeypatch.setattr("app.services.executor.analyze_image_intent", _fake_analyze_image_intent)
+    monkeypatch.setattr("app.services.executor.ensure_transparent_background", _fake_ensure_transparent_background)
+
+    async with session_factory() as session:
+        locked = await fetch_and_lock_next_generation_task(
+            session,
+            lease_owner="pytest-scene-edit-preprocess",
+            batch_id=int(mock_batch_data["batch_id"]),
+        )
+    assert locked is not None
+
+    await process_generation_task(locked.id, session_factory)
+
+    assert captured_payloads
+    assert captured_payloads[0]["provider_hint"] == "openai_image_edit"
+    assert captured_payloads[0]["source_image_name"] == "converted.png"
+    assert captured_payloads[0]["source_image_preprocessed"] is True
+    assert "path" in generated_path_holder
+    assert not generated_path_holder["path"].exists()

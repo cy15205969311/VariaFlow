@@ -6,27 +6,27 @@
 
     <section class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
       <StatCard
-        title="总任务"
+        title="总任务数"
         :value="formatStat(totalGenerationCount)"
-        hint="较昨日 +12.5%"
+        hint="当前批次累计变体任务"
         tone="neutral"
       />
       <StatCard
         title="正在生成"
         :value="formatStat(processingGenerationCount)"
-        hint="并行处理中"
+        hint="包含排队、处理中与重试中"
         tone="info"
       />
       <StatCard
         title="成功落盘"
         :value="formatStat(successGenerationCount)"
-        hint="成功率 98.2%"
+        hint="已通过规则质检并写入输出目录"
         tone="success"
       />
       <StatCard
-        title="质检异常"
+        title="异常失败"
         :value="formatStat(failedGenerationCount)"
-        hint="需人工复核"
+        hint="可在下方任务卡片中查看并手动重试"
         tone="danger"
       />
     </section>
@@ -43,7 +43,7 @@
       </div>
       <div class="flex flex-col gap-1">
         <span class="text-[11px] text-gray-400">批次状态</span>
-        <el-tag :type="statusTagType" effect="plain">{{ batchInfo?.status || "idle" }}</el-tag>
+        <el-tag :type="statusTagType" effect="plain">{{ batchInfo.status || "idle" }}</el-tag>
       </div>
       <div class="flex flex-col gap-1">
         <span class="text-[11px] text-gray-400">原图数量</span>
@@ -61,7 +61,7 @@
         <el-button
           text
           type="primary"
-          :disabled="!appStore.currentBatchId || loadingBatch"
+          :disabled="!batchStore.currentBatchId || batchStore.loadingBatch"
           @click="refreshBatch"
         >
           刷新状态
@@ -69,46 +69,48 @@
       </div>
     </section>
 
-    <TaskBoard :batch-id="appStore.currentBatchId" />
+    <TaskBoard />
   </div>
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, ref } from "vue";
+import { computed, onBeforeUnmount, watch } from "vue";
 
-import { getBatchInfo } from "@/api/batch";
-import { useAppStore } from "@/stores/app";
 import StatCard from "@/views/Dashboard/components/StatCard.vue";
 import TaskBoard from "@/views/Dashboard/TaskBoard.vue";
 import UploadEngine from "@/views/Dashboard/components/UploadEngine.vue";
+import { useBatchStore } from "@/stores/batch";
 
-const appStore = useAppStore();
+const batchStore = useBatchStore();
 
-const batchInfo = ref(null);
-const loadingBatch = ref(false);
-let pollingTimer = null;
+const batchInfo = computed(() => batchStore.batchInfo);
 
 const activeBatchLabel = computed(() => {
-  if (!appStore.currentBatchId) {
+  if (!batchStore.currentBatchId) {
     return "未开始";
   }
-  return `#${appStore.currentBatchId}`;
+  return `#${batchStore.currentBatchId}`;
 });
 
-const totalGenerationCount = computed(() => batchInfo.value?.total_generation_count || 1246);
-const successGenerationCount = computed(() => batchInfo.value?.success_generation_count || 8532);
-const failedGenerationCount = computed(() => batchInfo.value?.failed_generation_count || 23);
+const totalGenerationCount = computed(() => batchInfo.value?.total_generation_count || 0);
+const successGenerationCount = computed(() => batchInfo.value?.success_generation_count || 0);
+const failedGenerationCount = computed(() => batchInfo.value?.failed_generation_count || 0);
 const processingGenerationCount = computed(() =>
   Math.max(
     totalGenerationCount.value - successGenerationCount.value - failedGenerationCount.value,
-    312
+    0
   )
 );
 
 const remainingLabel = computed(() => {
-  if (!batchInfo.value?.estimated_remaining_seconds && batchInfo.value?.estimated_remaining_seconds !== 0) {
+  if (batchInfo.value?.estimated_remaining_seconds === 0) {
+    return "0s";
+  }
+
+  if (!batchInfo.value?.estimated_remaining_seconds) {
     return "--";
   }
+
   return `${batchInfo.value.estimated_remaining_seconds}s`;
 });
 
@@ -130,48 +132,32 @@ function formatStat(value) {
   return new Intl.NumberFormat("zh-CN").format(value || 0);
 }
 
-async function fetchBatch(batchId) {
-  if (!batchId) {
-    return;
-  }
-
-  loadingBatch.value = true;
-  try {
-    const data = await getBatchInfo(batchId);
-    batchInfo.value = data;
-  } finally {
-    loadingBatch.value = false;
-  }
-}
-
-function stopPolling() {
-  if (pollingTimer) {
-    window.clearInterval(pollingTimer);
-    pollingTimer = null;
-  }
-}
-
-function startPolling(batchId) {
-  stopPolling();
-  pollingTimer = window.setInterval(() => {
-    fetchBatch(batchId);
-  }, 3000);
-}
-
 async function handleUploadSuccess(batchId) {
-  appStore.setCurrentBatchId(batchId);
-  await fetchBatch(batchId);
-  startPolling(batchId);
+  batchStore.setCurrentBatchId(batchId);
 }
 
 async function refreshBatch() {
-  if (!appStore.currentBatchId) {
+  if (!batchStore.currentBatchId) {
     return;
   }
-  await fetchBatch(appStore.currentBatchId);
+  await batchStore.refreshAll(batchStore.currentBatchId);
 }
 
+watch(
+  () => batchStore.currentBatchId,
+  async (batchId) => {
+    batchStore.stopPolling();
+    if (!batchId) {
+      return;
+    }
+
+    await batchStore.refreshAll(batchId);
+    batchStore.startPolling(batchId);
+  },
+  { immediate: true }
+);
+
 onBeforeUnmount(() => {
-  stopPolling();
+  batchStore.stopPolling();
 });
 </script>

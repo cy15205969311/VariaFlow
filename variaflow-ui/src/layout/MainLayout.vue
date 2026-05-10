@@ -1,6 +1,6 @@
 <template>
   <div class="flex min-h-screen bg-[#f4f5f7] font-sans text-zinc-900">
-    <aside class="hidden w-[230px] shrink-0 border-r border-[#E5E7EB] bg-white lg:flex lg:h-screen lg:flex-col lg:pb-4">
+    <aside class="hidden w-[230px] shrink-0 border-r border-[#E5E7EB] bg-white lg:fixed lg:inset-y-0 lg:left-0 lg:flex lg:h-screen lg:flex-col lg:overflow-y-auto lg:pb-4">
       <div class="flex h-[68px] shrink-0 items-center px-6">
         <div class="mr-2.5 flex h-5 w-5 items-center justify-center rounded-md border border-zinc-200 bg-white shadow-sm">
           <span class="text-[9px] font-bold tracking-[0.2em] text-black">VF</span>
@@ -50,7 +50,7 @@
       </div>
     </aside>
 
-    <div class="flex min-w-0 flex-1 flex-col">
+    <div class="flex min-w-0 flex-1 flex-col lg:ml-[230px]">
       <header class="flex h-[68px] shrink-0 items-center justify-between border-b border-[#E5E7EB] bg-white px-4 md:px-6">
         <div class="flex items-center gap-2 text-sm">
           <span class="text-[14px] text-gray-500">控制台</span>

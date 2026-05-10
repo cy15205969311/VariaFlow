@@ -41,6 +41,7 @@ from app.services.prompt_builder import build_provider_payload
 from app.services.qc_engine import QualityCheckResult
 from app.services.qc_engine import run_rules_qc
 from app.services.vision_router import analyze_image_intent
+from app.utils.image_processor import ensure_transparent_background
 
 DEFAULT_QC_CONFIG = {
     "min_file_size_bytes": settings.qc_min_file_size_bytes,
@@ -149,20 +150,28 @@ async def _prepare_execution_context(
         subject_features=vision_decision.subject_features,
         style_features=vision_decision.style_features,
         background_features=vision_decision.background_features,
+        sku_category=vision_decision.sku_category,
+        suggested_scene=vision_decision.suggested_scene,
     )
     payload["vision_route_intent"] = vision_decision.intent
     payload["vision_route_reason"] = vision_decision.reason
     payload["provider_hint"] = _resolve_provider_hint(vision_decision.intent)
+    payload["sku_category"] = vision_decision.sku_category
+    payload["suggested_scene"] = vision_decision.suggested_scene
     payload["subject_features"] = vision_decision.subject_features
     payload["style_features"] = vision_decision.style_features
     payload["background_features"] = vision_decision.background_features
     payload["vision_route_used_fallback"] = vision_decision.used_fallback
+    prompt_snapshot["suggested_scene"] = vision_decision.suggested_scene
     prompt_snapshot["subject_features"] = vision_decision.subject_features
     prompt_snapshot["style_features"] = vision_decision.style_features
     prompt_snapshot["background_features"] = vision_decision.background_features
+    prompt_snapshot["sku_category"] = vision_decision.sku_category
     prompt_snapshot["vision_router"] = {
         "intent": vision_decision.intent,
         "reason": vision_decision.reason,
+        "sku_category": vision_decision.sku_category,
+        "suggested_scene": vision_decision.suggested_scene,
         "subject_features": vision_decision.subject_features,
         "style_features": vision_decision.style_features,
         "background_features": vision_decision.background_features,
@@ -428,11 +437,31 @@ async def process_generation_task(
     response_meta: dict[str, Any] = {}
     temp_file: Path | None = None
     attempt_id: int | None = None
+    transient_source_path: Path | None = None
     started_at = datetime.utcnow()
 
     try:
         async with db_session_factory() as session:
             context = await _prepare_execution_context(session, task_id)
+
+        source_image_path = Path(context.payload["source_image_path"])
+        provider_hint = str(context.payload.get("provider_hint") or "").strip().lower()
+        intent = str(context.payload.get("intent") or "").strip().upper()
+        if intent == "SCENE_EDIT" and provider_hint == "openai_image_edit":
+            prepared_source_path = await asyncio.to_thread(
+                ensure_transparent_background,
+                source_image_path,
+                context.batch_output_root.parent / "preprocessed",
+            )
+            if prepared_source_path != source_image_path:
+                transient_source_path = prepared_source_path
+                context.payload["source_image_path"] = str(prepared_source_path)
+                context.payload["source_image_name"] = prepared_source_path.name
+                context.payload["source_image_preprocessed"] = True
+                context.prompt_snapshot.setdefault("provider_context", {})["preprocessed_source_image_path"] = str(
+                    prepared_source_path
+                )
+
         async with db_session_factory() as session:
             attempt = await _create_attempt_record(
                 session,
@@ -633,3 +662,9 @@ async def process_generation_task(
                 latency_ms=latency_ms,
                 response_meta=response_meta,
             )
+    finally:
+        if transient_source_path is not None and transient_source_path.exists():
+            try:
+                await asyncio.to_thread(transient_source_path.unlink, True)
+            except OSError:
+                logger.warning("Failed to cleanup transient source image: %s", transient_source_path)

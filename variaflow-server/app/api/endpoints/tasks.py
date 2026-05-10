@@ -43,6 +43,28 @@ def _extract_subject_features(slot: GenerationTask) -> str | None:
     return None
 
 
+def _extract_sku_category(slot: GenerationTask) -> str | None:
+    snapshot = slot.prompt_snapshot_json or {}
+    value = snapshot.get("sku_category")
+    vision_router = snapshot.get("vision_router") or {}
+    if not value:
+        value = vision_router.get("sku_category")
+    if isinstance(value, str):
+        return value.strip() or None
+    return None
+
+
+def _extract_suggested_scene(slot: GenerationTask) -> str | None:
+    snapshot = slot.prompt_snapshot_json or {}
+    value = snapshot.get("suggested_scene")
+    vision_router = snapshot.get("vision_router") or {}
+    if not value:
+        value = vision_router.get("suggested_scene")
+    if isinstance(value, str):
+        return value.strip() or None
+    return None
+
+
 def _extract_snapshot_text(slot: GenerationTask, key: str) -> str | None:
     snapshot = slot.prompt_snapshot_json or {}
     value = snapshot.get(key)
@@ -74,6 +96,8 @@ def _build_generation_task_slot_response(slot: GenerationTask) -> GenerationTask
         intent=intent,
         intent_label=_intent_label(intent),
         intent_reason=reason,
+        sku_category=_extract_sku_category(slot),
+        suggested_scene=_extract_suggested_scene(slot),
         subject_features=subject_features,
         style_features=style_features,
         background_features=background_features,

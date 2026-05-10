@@ -209,8 +209,8 @@ async def process_upload(file: UploadFile, session: AsyncSession) -> BatchJob:
 
     target_variant_count = (
         settings.default_target_variant_count
-        if settings.default_target_variant_count in {2, 3}
-        else 3
+        if settings.default_target_variant_count in {1, 2, 3}
+        else 1
     )
     total_source_count = len(normalized_images)
     total_generation_count = total_source_count * target_variant_count

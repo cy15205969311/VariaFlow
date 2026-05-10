@@ -6,7 +6,16 @@ from types import SimpleNamespace
 import app.core.config as config_module
 from app.core.config import _normalize_openai_image_edit_url
 from app.core.config import _normalize_openai_image_generation_url
-from app.core.prompt_lexicon import CAMERA_TERMS, LIGHTING_TERMS, QUALITY_TERMS, RENDER_TERMS
+from app.core.prompt_lexicon import (
+    CAMERA_TERMS,
+    ENVIRONMENT_TEMPLATES,
+    LIGHTING_TERMS,
+    NEGATIVE_SPACE_COMPOSITION_RULE,
+    QUALITY_TERMS,
+    RENDER_TERMS,
+    SCENE_RECIPES,
+    SPATIAL_GROUNDING_PROMPTS,
+)
 from app.services.prompt_builder import build_provider_payload
 
 
@@ -72,6 +81,79 @@ def test_build_provider_payload_preserves_source_extension() -> None:
     assert payload["source_image_name"] == "S0001_src_mock.webp"
 
 
+def test_build_provider_payload_injects_grounding_prompt_for_scene_edit() -> None:
+    batch = SimpleNamespace(batch_code="batch-001a")
+    source_task = SimpleNamespace(
+        source_name="S0001_src_mock.png",
+        source_ext="png",
+        source_path="E:/tmp/S0001_src_mock.png",
+        identity_profile_json={"identity_lock": "Keep the same subject identity."},
+        batch=batch,
+        id=11,
+        source_hash="grounding001",
+    )
+    generation_task = SimpleNamespace(
+        id=111,
+        variant_index=1,
+        variant_axis=SimpleNamespace(value="scene"),
+    )
+
+    payload, snapshot = build_provider_payload(
+        source_task,
+        generation_task,
+        intent="SCENE_EDIT",
+        intent_reason="standard_product",
+        sku_category="bottle_standing",
+        suggested_scene="natural_skincare_luxury",
+    )
+
+    assert payload["provider_hint"] == "openai_image_edit"
+    assert payload["sku_category"] == "bottle_standing"
+    assert payload["suggested_scene"] == "natural_skincare_luxury"
+    assert snapshot["sku_category"] == "bottle_standing"
+    assert snapshot["suggested_scene"] == "natural_skincare_luxury"
+    assert "CRITICAL GROUNDING:" in payload["prompt"]
+    assert "VIRAL SCENE RECIPE:" in payload["prompt"]
+    assert "ENVIRONMENT & BACKGROUND:" in payload["prompt"]
+    assert SPATIAL_GROUNDING_PROMPTS["bottle_standing"] in payload["prompt"]
+    assert SCENE_RECIPES["natural_skincare_luxury"] in payload["prompt"]
+    assert payload["suggested_scene_prompt"].startswith(SCENE_RECIPES["natural_skincare_luxury"])
+    assert NEGATIVE_SPACE_COMPOSITION_RULE in payload["prompt"]
+
+
+def test_build_provider_payload_uses_scene_fallback_template_when_suggested_scene_missing() -> None:
+    batch = SimpleNamespace(batch_code="batch-001b")
+    source_task = SimpleNamespace(
+        source_name="S0001_src_mock.png",
+        source_ext="png",
+        source_path="E:/tmp/S0001_src_mock.png",
+        identity_profile_json={"identity_lock": "Keep the same subject identity."},
+        batch=batch,
+        id=12,
+        source_hash="fallback001",
+    )
+    generation_task = SimpleNamespace(
+        id=112,
+        variant_index=2,
+        variant_axis=SimpleNamespace(value="scene"),
+    )
+
+    payload, snapshot = build_provider_payload(
+        source_task,
+        generation_task,
+        intent="SCENE_EDIT",
+        sku_category="apparel_hanging",
+        suggested_scene="",
+    )
+
+    assert payload["provider_hint"] == "openai_image_edit"
+    assert payload["sku_category"] == "apparel_hanging"
+    assert payload["suggested_scene"] in SCENE_RECIPES
+    assert snapshot["suggested_scene"] in SCENE_RECIPES
+    assert payload["suggested_scene_prompt"].startswith(SCENE_RECIPES[payload["suggested_scene"]])
+    assert any(template in payload["suggested_scene_prompt"] for template in ENVIRONMENT_TEMPLATES["apparel_hanging"])
+
+
 def test_build_provider_payload_switches_prompt_for_pose_variation() -> None:
     batch = SimpleNamespace(batch_code="batch-002")
     source_task = SimpleNamespace(
@@ -94,6 +176,7 @@ def test_build_provider_payload_switches_prompt_for_pose_variation() -> None:
         generation_task,
         intent="POSE_VARIATION",
         intent_reason="cartoon_character",
+        sku_category="3d_toy",
         subject_features="3D chibi cartoon monkey, large brown eyes, fluffy light brown fur",
         style_features="polished 3D blind-box render, glossy toy material",
         background_features="soft warm indoor studio gradient background",
@@ -101,6 +184,7 @@ def test_build_provider_payload_switches_prompt_for_pose_variation() -> None:
 
     assert payload["intent"] == "POSE_VARIATION"
     assert snapshot["intent"] == "POSE_VARIATION"
+    assert snapshot["sku_category"] == "3d_toy"
     assert snapshot["subject_features"] == "3D chibi cartoon monkey, large brown eyes, fluffy light brown fur"
     assert snapshot["style_features"] == "polished 3D blind-box render, glossy toy material"
     assert snapshot["background_features"] == "soft warm indoor studio gradient background"
@@ -108,6 +192,10 @@ def test_build_provider_payload_switches_prompt_for_pose_variation() -> None:
     assert payload["style_features"] == "polished 3D blind-box render, glossy toy material"
     assert payload["background_features"] == "soft warm indoor studio gradient background"
     assert payload["provider_hint"] == "openai_image_generation"
+    assert payload["sku_category"] == "3d_toy"
+    assert payload["suggested_scene"] == ""
+    assert snapshot["suggested_scene"] == ""
+    assert payload["suggested_scene_prompt"] == ""
     assert "Create a masterpiece, ultra-high definition image of the exact same IP character in a new pose." in payload["prompt"]
     assert "Must strictly adhere to this exact artistic style and lighting" in payload["prompt"]
     assert "The environment and background must be" in payload["prompt"]

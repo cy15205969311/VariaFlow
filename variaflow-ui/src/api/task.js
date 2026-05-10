@@ -14,3 +14,10 @@ export function getTasks(params = {}) {
     params: query,
   });
 }
+
+export function retryGenerationTask(taskId) {
+  return request({
+    url: `/tasks/${taskId}/retry`,
+    method: "post",
+  });
+}

@@ -17,20 +17,34 @@ logger = logging.getLogger(__name__)
 INTENT_SCENE_EDIT = "SCENE_EDIT"
 INTENT_POSE_VARIATION = "POSE_VARIATION"
 SUPPORTED_INTENTS = {INTENT_SCENE_EDIT, INTENT_POSE_VARIATION}
+SUPPORTED_SKU_CATEGORIES = {
+    "apparel_flat",
+    "apparel_hanging",
+    "bottle_standing",
+    "box_standing",
+    "3d_toy",
+    "other_flat",
+}
 
 VISION_SYSTEM_PROMPT = (
     "You are an ecommerce visual routing system. "
     "Analyze the primary subject in the image and classify it into exactly one intent. "
-    "Return only valid JSON with the keys intent, reason, subject_features, style_features, and background_features. "
+    "Return only valid JSON with the keys intent, reason, sku_category, suggested_scene, subject_features, style_features, and background_features. "
     "Use SCENE_EDIT for inanimate products or standard merchandise whose physical shape must stay unchanged. "
     "Use POSE_VARIATION for cartoon IP, mascots, animals, dolls, characters, or people whose pose, expression, styling, or outfit may vary. "
+    "sku_category must be exactly one of: apparel_flat, apparel_hanging, bottle_standing, box_standing, 3d_toy, other_flat. "
+    "Choose sku_category based on the real-world physical placement that best matches the subject. "
+    "For SCENE_EDIT, suggested_scene must be exactly one of these recipe keys: old_money_vintage, clean_fit_minimal, cozy_winter_morning, soft_girly_lifestyle, natural_skincare_luxury. "
+    "Choose the recipe key that best matches the product's material, mood, target lifestyle, and ecommerce merchandising potential. "
     "For POSE_VARIATION, subject_features must be a detailed English description of stable identity traits only, "
-    "including species, rendering style, face structure, fur or material texture, color palette, body proportions, and signature accessories. "
+    "including species, face structure, fur or material texture, color palette, body proportions, and permanent anatomical identity markers. "
+    "Do not include clothing, accessories, props, held items, gesture, pose, camera angle, or temporary styling in subject_features, even if they are visually prominent. "
     "For POSE_VARIATION, style_features must describe the stable visual style such as 3D toy render, photorealistic studio photo, cel shading, lighting mood, and material rendering. "
     "For POSE_VARIATION, background_features must describe the original background environment, color atmosphere, and scene context. "
-    "Do not mention the current pose, gesture, camera angle, background, or temporary clothing unless it is a permanent identity trait. "
-    "For SCENE_EDIT, subject_features, style_features, and background_features must all be empty strings. "
-    'Example: {"intent":"POSE_VARIATION","reason":"cartoon mascot character with editable pose and outfit","subject_features":"3D chibi cartoon monkey, large brown eyes, fluffy light brown fur, big round ears, oversized head-to-body ratio","style_features":"polished 3D blind-box render, soft global illumination, glossy collectible toy finish","background_features":"warm indoor studio backdrop with clean gradient and soft ambient shadows"}'
+    "Do not mention the current pose, gesture, camera angle, background, temporary clothing, props, or temporary accessories unless they are permanent identity traits. "
+    "For POSE_VARIATION, suggested_scene must be an empty string. "
+    "For SCENE_EDIT, subject_features, style_features, and background_features must all be empty strings, but sku_category and suggested_scene must be filled. "
+    'Example: {"intent":"POSE_VARIATION","reason":"cartoon mascot character with editable pose and outfit","sku_category":"3d_toy","suggested_scene":"","subject_features":"3D chibi cartoon monkey, large brown eyes, fluffy light brown fur, big round ears, oversized head-to-body ratio","style_features":"polished 3D blind-box render, soft global illumination, glossy collectible toy finish","background_features":"warm indoor studio backdrop with clean gradient and soft ambient shadows"}'
 )
 
 JSON_OBJECT_PATTERN = re.compile(r"\{.*?\}", re.DOTALL)
@@ -41,6 +55,8 @@ class VisionRouteDecision:
     intent: str
     reason: str
     raw_text: str
+    sku_category: str = "other_flat"
+    suggested_scene: str = ""
     subject_features: str = ""
     style_features: str = ""
     background_features: str = ""
@@ -93,6 +109,19 @@ def _normalize_feature_text(value: Any, intent: str) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip()
 
 
+def _normalize_suggested_scene(value: Any, intent: str) -> str:
+    if intent != INTENT_SCENE_EDIT:
+        return ""
+    return re.sub(r"\s+", " ", str(value or "")).strip()
+
+
+def _normalize_sku_category(value: Any) -> str:
+    category = str(value or "").strip().lower()
+    if category in SUPPORTED_SKU_CATEGORIES:
+        return category
+    return "other_flat"
+
+
 def _image_to_data_url(image_bytes: bytes, source_image_name: str) -> str:
     suffix = Path(source_image_name).suffix.lower()
     mime_type = {
@@ -117,7 +146,7 @@ def _build_payload(image_data_url: str) -> dict[str, Any]:
                         "type": "text",
                         "text": (
                             "Classify this image as SCENE_EDIT or POSE_VARIATION. "
-                            "Return only JSON with intent, reason, subject_features, style_features, and background_features."
+                            "Return only JSON with intent, reason, sku_category, suggested_scene, subject_features, style_features, and background_features."
                         ),
                     },
                     {
@@ -167,6 +196,8 @@ async def analyze_image_intent(
             intent=_default_intent(),
             reason="vision_router_disabled",
             raw_text="",
+            sku_category="other_flat",
+            suggested_scene="",
             subject_features="",
             style_features="",
             background_features="",
@@ -218,6 +249,8 @@ async def analyze_image_intent(
             intent=_default_intent(),
             reason=f"vision_router_error:{exc}",
             raw_text="",
+            sku_category="other_flat",
+            suggested_scene="",
             subject_features="",
             style_features="",
             background_features="",
@@ -229,6 +262,8 @@ async def analyze_image_intent(
         parsed = _extract_json_object(raw_text)
         intent = _normalize_intent(parsed.get("intent"))
         reason = str(parsed.get("reason") or "").strip() or "classified_by_model"
+        sku_category = _normalize_sku_category(parsed.get("sku_category"))
+        suggested_scene = _normalize_suggested_scene(parsed.get("suggested_scene"), intent)
         subject_features = _normalize_subject_features(parsed.get("subject_features"), intent)
         style_features = _normalize_feature_text(parsed.get("style_features"), intent)
         background_features = _normalize_feature_text(parsed.get("background_features"), intent)
@@ -236,6 +271,8 @@ async def analyze_image_intent(
             intent=intent,
             reason=reason,
             raw_text=raw_text,
+            sku_category=sku_category,
+            suggested_scene=suggested_scene,
             subject_features=subject_features,
             style_features=style_features,
             background_features=background_features,
@@ -247,6 +284,8 @@ async def analyze_image_intent(
             intent=_default_intent(),
             reason=f"vision_router_parse_error:{exc}",
             raw_text="",
+            sku_category="other_flat",
+            suggested_scene="",
             subject_features="",
             style_features="",
             background_features="",

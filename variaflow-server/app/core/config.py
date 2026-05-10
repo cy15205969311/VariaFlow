@@ -177,6 +177,79 @@ def _get_vision_api_key() -> str:
     )
 
 
+def _get_vision_provider() -> str:
+    return (_get_env("VARIAFLOW_VISION_PROVIDER", "mimo") or "mimo").strip().lower()
+
+
+def _get_effective_vision_api_url() -> str:
+    provider = _get_vision_provider()
+    if provider == "deepseek":
+        return _normalize_chat_completions_url(
+            _get_env(
+                "VARIAFLOW_DEEPSEEK_VISION_API_URL",
+                "https://api.deepseek.com/v1/chat/completions",
+            )
+        )
+    if provider == "mimo":
+        return _normalize_chat_completions_url(
+            _get_env(
+                "VARIAFLOW_MIMO_VISION_API_URL",
+                "https://token-plan-cn.xiaomimimo.com/v1/chat/completions",
+            )
+        )
+    return _normalize_chat_completions_url(
+        _get_env(
+            "VARIAFLOW_VISION_API_URL",
+            "https://www.onetopai.asia/v1/chat/completions",
+        )
+    )
+
+
+def _get_effective_vision_model() -> str:
+    provider = _get_vision_provider()
+    if provider == "deepseek":
+        return (
+            _get_env(
+                "VARIAFLOW_DEEPSEEK_VISION_MODEL",
+                "deepseek-v4-flash",
+            )
+            or "deepseek-v4-flash"
+        )
+    if provider == "mimo":
+        return (
+            _get_env(
+                "VARIAFLOW_MIMO_VISION_MODEL",
+                "mimo-v2-omni",
+            )
+            or "mimo-v2-omni"
+        )
+    return _get_env(
+        "VARIAFLOW_VISION_MODEL",
+        "mimo-v2-omni",
+    ) or "mimo-v2-omni"
+
+
+def _get_effective_vision_api_key() -> str:
+    provider = _get_vision_provider()
+    if provider == "deepseek":
+        return (
+            _get_env(
+                "VARIAFLOW_DEEPSEEK_VISION_API_KEY",
+                "",
+            )
+            or ""
+        )
+    if provider == "mimo":
+        return (
+            _get_env(
+                "VARIAFLOW_MIMO_VISION_API_KEY",
+                "",
+            )
+            or ""
+        )
+    return _get_vision_api_key()
+
+
 def _get_effective_database_url() -> str:
     if _is_test_runtime():
         test_database_url = _get_test_database_url()
@@ -262,17 +335,10 @@ class Settings:
         aliases=("OPENAI_API_KEY", "VARIAFLOW_OPENAI_IMAGE_2_API_KEY"),
     ) or ""
     vision_router_enabled: bool = _get_bool("VARIAFLOW_VISION_ROUTER_ENABLED", True)
-    vision_api_url: str = _normalize_chat_completions_url(
-        _get_env(
-            "VARIAFLOW_VISION_API_URL",
-            "https://www.onetopai.asia/v1/chat/completions",
-        )
-    )
-    vision_model: str = _get_env(
-        "VARIAFLOW_VISION_MODEL",
-        "gpt5.4",
-    ) or "gpt5.4"
-    vision_api_key: str = field(default_factory=_get_vision_api_key)
+    vision_provider: str = field(default_factory=_get_vision_provider)
+    vision_api_url: str = field(default_factory=_get_effective_vision_api_url)
+    vision_model: str = field(default_factory=_get_effective_vision_model)
+    vision_api_key: str = field(default_factory=_get_effective_vision_api_key)
     vision_request_timeout_seconds: float = _get_float(
         "VARIAFLOW_VISION_REQUEST_TIMEOUT_SECONDS",
         45.0,
@@ -300,7 +366,7 @@ class Settings:
     ) or "description_edit"
     aliyun_imageedit_strength: float = _get_float(
         "VARIAFLOW_ALIYUN_IMAGEEDIT_STRENGTH",
-        0.35,
+        0.85,
     )
     aliyun_wanx_api_key: str = _get_env(
         "VARIAFLOW_ALIYUN_WANX_API_KEY",
