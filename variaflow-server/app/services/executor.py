@@ -69,6 +69,13 @@ class ExecutionContext:
     prompt_snapshot: dict[str, Any]
 
 
+def _resolve_provider_hint(intent: str) -> str:
+    normalized_intent = str(intent or "SCENE_EDIT").strip().upper()
+    if normalized_intent == "POSE_VARIATION":
+        return "openai_image_generation"
+    return "openai_image_edit"
+
+
 def _payload_hash(payload: dict[str, Any]) -> str:
     normalized = json.dumps(payload, sort_keys=True, ensure_ascii=True)
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
@@ -145,6 +152,7 @@ async def _prepare_execution_context(
     )
     payload["vision_route_intent"] = vision_decision.intent
     payload["vision_route_reason"] = vision_decision.reason
+    payload["provider_hint"] = _resolve_provider_hint(vision_decision.intent)
     payload["subject_features"] = vision_decision.subject_features
     payload["style_features"] = vision_decision.style_features
     payload["background_features"] = vision_decision.background_features
@@ -163,6 +171,13 @@ async def _prepare_execution_context(
         "provider": vision_decision.provider,
         "raw_text": vision_decision.raw_text,
     }
+    prompt_snapshot["provider_hint"] = payload["provider_hint"]
+
+    logger.info(
+        "[Router] %s detected, routing to %s pipeline",
+        vision_decision.intent,
+        payload["provider_hint"],
+    )
 
     task.prompt_snapshot_json = prompt_snapshot
     await session.commit()

@@ -111,8 +111,15 @@ def _build_adapter(provider_route: ProviderRoute, payload_json: dict[str, Any]) 
 
     preferred_provider = settings.image_provider.strip().lower()
     request_intent = str(payload_json.get("intent") or "").strip().upper()
+    provider_hint = str(payload_json.get("provider_hint") or "").strip().lower()
     if provider_route == ProviderRoute.FALLBACK and not settings.provider_enable_fallback:
         raise ValueError("Provider fallback is disabled")
+    if provider_hint == "aliyun_wanx":
+        return AliyunAdapter()
+    if provider_hint == "openai_image_edit":
+        return OpenAIImageAdapter()
+    if provider_hint == "openai_image_generation":
+        return OpenAIVariationAdapter()
     if preferred_provider == "aliyun":
         return AliyunAdapter() if provider_route == ProviderRoute.PRIMARY else OpenAIImageAdapter()
     if preferred_provider == "wanxiang_legacy":

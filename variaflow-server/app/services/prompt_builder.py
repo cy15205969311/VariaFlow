@@ -53,6 +53,14 @@ DEFAULT_VARIANT_LIBRARY: dict[str, list[str]] = {
     ],
 }
 
+POSE_VARIATION_ACTION_LIBRARY = [
+    "wave one hand naturally while wearing a sleek cyberpunk bomber jacket",
+    "jump lightly with an energetic expression while wearing a soft pastel hoodie",
+    "hold a takeaway coffee cup with a relaxed smile while wearing a tailored modern suit",
+    "stand confidently with one hand on the hip while wearing a sporty varsity jacket",
+    "lean forward in a playful commercial pose while wearing a trendy streetwear windbreaker",
+]
+
 
 def _choose_slot_value(values: list[str], slot_seed: int) -> str:
     if not values:
@@ -150,37 +158,42 @@ def _build_pose_variation_prompt(
     style_features: str | None = None,
     background_features: str | None = None,
 ) -> str:
-    style_parts = [
-        fragments.get("camera_fragment", "").strip(),
-        fragments.get("style_fragment", "").strip(),
-        quality_template.strip(),
-    ]
-    style_suffix = ", ".join(part for part in style_parts if part)
-    feature_clauses: list[str] = []
-    if subject_features and subject_features.strip():
-        feature_clauses.append(
-            "Character exact identity matching: "
-            f"[{subject_features.strip()}]."
-        )
-    if style_features and style_features.strip():
-        feature_clauses.append(
-            "Style strictly matching: "
-            f"[{style_features.strip()}]."
-        )
-    if background_features and background_features.strip():
-        feature_clauses.append(
-            "Background strictly matching: "
-            f"[{background_features.strip()}]."
-        )
-    feature_clause = " ".join(feature_clauses)
+    slot_seed = (
+        sum(ord(char) for char in (subject_features or ""))
+        + len(style_features or "")
+        + len(background_features or "")
+        + len(identity_lock or "")
+    )
+    fallback_action = POSE_VARIATION_ACTION_LIBRARY[slot_seed % len(POSE_VARIATION_ACTION_LIBRARY)]
+    action_required = fallback_action
+    scene_inspiration = (
+        fragments.get("scene_fragment")
+        or fragments.get("action_fragment")
+        or fragments.get("outfit_fragment")
+        or ""
+    ).strip()
+    style_clause = style_features.strip() if style_features and style_features.strip() else (
+        "premium stylized 3D character render with polished materials, appealing cinematic lighting, and refined toy-like detailing"
+    )
+    background_clause = background_features.strip() if background_features and background_features.strip() else (
+        scene_inspiration or "a premium commercial lifestyle background with depth and atmosphere"
+    )
+    subject_clause = subject_features.strip() if subject_features and subject_features.strip() else (
+        "the exact same character identity, species, facial features, body proportions, and signature visual traits"
+    )
+    camera_clause = fragments.get("camera_fragment", "").strip()
+    quality_clause = quality_template.strip()
+    style_tail = ", ".join(part for part in [camera_clause, fragments.get("style_fragment", "").strip(), quality_clause] if part)
     return (
-        "A highly detailed image variation based on the reference character. "
-        "Keep the same core subject identity from the reference image. "
-        f"{feature_clause} "
+        "Create a masterpiece, ultra-high definition image of the exact same IP character in a new pose. "
+        f"Must strictly adhere to this exact artistic style and lighting: [{style_clause}]. "
+        f"The environment and background must be: [{background_clause}]. "
+        f"The main character must exactly match this physical description and identity, without changing species, face, body proportions, or signature traits: [{subject_clause}]. "
         f"{identity_lock}. "
-        "You may change pose, gesture, styling, or clothing while preserving face, species, palette, silhouette, and brand-defining details. "
-        f"Generate this exact character performing a new expressive variation inspired by: {fragments.get('action_fragment') or fragments.get('scene_fragment') or 'friendly commercial character pose'}. "
-        f"{style_suffix}"
+        "Preserve the same premium 3D blind-box quality, facial appeal, material richness, and overall charm. "
+        "Do not create a different character. Do not drift into a generic monkey. "
+        f"ACTION & OUTFIT MODIFICATION: The character is now doing the following action and wearing this outfit: {action_required}. "
+        f"Ensure the result feels like the exact same IP in a new pose. {style_tail}"
     ).strip()
 
 
@@ -295,6 +308,7 @@ def build_provider_payload(
         "subject_features": subject_features if normalized_intent == "POSE_VARIATION" else "",
         "style_features": style_features if normalized_intent == "POSE_VARIATION" else "",
         "background_features": background_features if normalized_intent == "POSE_VARIATION" else "",
+        "provider_hint": "openai_image_generation" if normalized_intent == "POSE_VARIATION" else "openai_image_edit",
     }
 
     if negative_template:

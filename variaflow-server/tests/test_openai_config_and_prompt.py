@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import importlib
 from types import SimpleNamespace
 
+import app.core.config as config_module
 from app.core.config import _normalize_openai_image_edit_url
 from app.core.config import _normalize_openai_image_generation_url
 from app.services.prompt_builder import build_provider_payload
@@ -17,6 +19,34 @@ def test_normalize_openai_image_generation_url_accepts_edit_url() -> None:
     assert _normalize_openai_image_generation_url("https://api2.apiaqi.com") == "https://api2.apiaqi.com/v1/images/generations"
     assert _normalize_openai_image_generation_url("https://api2.apiaqi.com/v1") == "https://api2.apiaqi.com/v1/images/generations"
     assert _normalize_openai_image_generation_url("https://api2.apiaqi.com/v1/images/edits") == "https://api2.apiaqi.com/v1/images/generations"
+
+
+def test_settings_selects_mimo_vision_stack(monkeypatch) -> None:
+    monkeypatch.setenv("VARIAFLOW_VISION_PROVIDER", "mimo")
+    monkeypatch.setenv("VARIAFLOW_MIMO_VISION_API_URL", "https://token-plan-cn.xiaomimimo.com/v1")
+    monkeypatch.setenv("VARIAFLOW_MIMO_VISION_MODEL", "mimo-v2-omni")
+    monkeypatch.setenv("VARIAFLOW_MIMO_VISION_API_KEY", "mimo-key")
+    reloaded = importlib.reload(config_module)
+    assert reloaded.settings.vision_provider == "mimo"
+    assert reloaded.settings.vision_api_url == "https://token-plan-cn.xiaomimimo.com/v1/chat/completions"
+    assert reloaded.settings.vision_model == "mimo-v2-omni"
+    assert reloaded.settings.vision_api_key == "mimo-key"
+    monkeypatch.undo()
+    importlib.reload(config_module)
+
+
+def test_settings_selects_deepseek_vision_stack(monkeypatch) -> None:
+    monkeypatch.setenv("VARIAFLOW_VISION_PROVIDER", "deepseek")
+    monkeypatch.setenv("VARIAFLOW_DEEPSEEK_VISION_API_URL", "https://api.deepseek.com/v1")
+    monkeypatch.setenv("VARIAFLOW_DEEPSEEK_VISION_MODEL", "deepseek-v4-pro")
+    monkeypatch.setenv("VARIAFLOW_DEEPSEEK_VISION_API_KEY", "deepseek-key")
+    reloaded = importlib.reload(config_module)
+    assert reloaded.settings.vision_provider == "deepseek"
+    assert reloaded.settings.vision_api_url == "https://api.deepseek.com/v1/chat/completions"
+    assert reloaded.settings.vision_model == "deepseek-v4-pro"
+    assert reloaded.settings.vision_api_key == "deepseek-key"
+    monkeypatch.undo()
+    importlib.reload(config_module)
 
 
 def test_build_provider_payload_preserves_source_extension() -> None:
@@ -76,10 +106,16 @@ def test_build_provider_payload_switches_prompt_for_pose_variation() -> None:
     assert payload["subject_features"] == "3D chibi cartoon monkey, large brown eyes, fluffy light brown fur"
     assert payload["style_features"] == "polished 3D blind-box render, glossy toy material"
     assert payload["background_features"] == "soft warm indoor studio gradient background"
-    assert "You may change pose" in payload["prompt"]
-    assert "Character exact identity matching" in payload["prompt"]
-    assert "Style strictly matching" in payload["prompt"]
-    assert "Background strictly matching" in payload["prompt"]
+    assert payload["provider_hint"] == "openai_image_generation"
+    assert "Create a masterpiece, ultra-high definition image of the exact same IP character in a new pose." in payload["prompt"]
+    assert "Must strictly adhere to this exact artistic style and lighting" in payload["prompt"]
+    assert "The environment and background must be" in payload["prompt"]
+    assert "The main character must exactly match this physical description and identity" in payload["prompt"]
+    assert "ACTION & OUTFIT MODIFICATION:" in payload["prompt"]
+    assert "Ensure the result feels like the exact same IP in a new pose." in payload["prompt"]
     assert "3D chibi cartoon monkey, large brown eyes, fluffy light brown fur" in payload["prompt"]
     assert "polished 3D blind-box render, glossy toy material" in payload["prompt"]
     assert "soft warm indoor studio gradient background" in payload["prompt"]
+
+def test_default_aliyun_imageedit_strength_is_high_enough_for_pose_variation() -> None:
+    assert config_module.settings.aliyun_imageedit_strength == 0.85
