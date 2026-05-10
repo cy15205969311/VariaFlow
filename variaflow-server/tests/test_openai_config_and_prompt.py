@@ -63,8 +63,13 @@ def test_build_provider_payload_switches_prompt_for_pose_variation() -> None:
         generation_task,
         intent="POSE_VARIATION",
         intent_reason="cartoon_character",
+        subject_features="3D chibi cartoon monkey, large brown eyes, fluffy light brown fur",
     )
 
     assert payload["intent"] == "POSE_VARIATION"
     assert snapshot["intent"] == "POSE_VARIATION"
+    assert snapshot["subject_features"] == "3D chibi cartoon monkey, large brown eyes, fluffy light brown fur"
+    assert payload["subject_features"] == "3D chibi cartoon monkey, large brown eyes, fluffy light brown fur"
     assert "You may change pose" in payload["prompt"]
+    assert "The exact core identity must match these stable features" in payload["prompt"]
+    assert "3D chibi cartoon monkey, large brown eyes, fluffy light brown fur" in payload["prompt"]

@@ -87,6 +87,21 @@ data/batch_<batch_code>/
 - 默认关闭 OpenAI fallback，避免测试阶段混入其他提供方结果
 - Prompt 已调整为电商背景融合模式：主体保持不变，仅生成背景、环境与自然阴影
 
+## 智能双轨与特征注入
+- 视觉识别链路与生图链路已经解耦：
+  - 视觉识别使用 `VARIAFLOW_VISION_API_URL` + `VARIAFLOW_VISION_MODEL`
+  - 当前实测配置为 `gpt-5.4` 兼容 `chat/completions`
+  - 生图仍使用 `VARIAFLOW_OPENAI_IMAGE_MODEL=gpt-image-2`
+- 视觉路由会输出三个核心字段：
+  - `intent`: `SCENE_EDIT` 或 `POSE_VARIATION`
+  - `reason`: 路由原因
+  - `subject_features`: 仅在 `POSE_VARIATION` 时返回，描述角色稳定身份特征的英文短语
+- `subject_features` 会被写入任务 `prompt_snapshot_json`，并透传到任务列表 API
+- 当任务命中 `POSE_VARIATION` 时，Prompt Builder 会把 `subject_features` 强注入到最终提示词中，用于尽量锁定 IP 主体的一致性
+- 当前双轨执行策略：
+  - `SCENE_EDIT` -> `/v1/images/edits`
+  - `POSE_VARIATION` -> `/v1/images/generations`
+
 ## 说明
 - 上传接口 `POST /api/v1/batches/upload` 当前仅接收 ZIP 压缩包
 - 上传后的文件会落在 `VARIAFLOW_DATA_ROOT/batch_<batch_code>/...`

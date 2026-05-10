@@ -146,6 +146,7 @@ def _build_pose_variation_prompt(
     identity_lock: str,
     fragments: dict[str, str],
     quality_template: str,
+    subject_features: str | None = None,
 ) -> str:
     style_parts = [
         fragments.get("camera_fragment", "").strip(),
@@ -153,8 +154,15 @@ def _build_pose_variation_prompt(
         quality_template.strip(),
     ]
     style_suffix = ", ".join(part for part in style_parts if part)
+    feature_clause = ""
+    if subject_features and subject_features.strip():
+        feature_clause = (
+            "The exact core identity must match these stable features: "
+            f"{subject_features.strip()}. "
+        )
     return (
         "Character variation image generation. Keep the same core subject identity from the reference image. "
+        f"{feature_clause}"
         f"{identity_lock}. "
         "You may change pose, gesture, styling, or clothing while preserving face, species, palette, silhouette, and brand-defining details. "
         f"Create a new expressive variant inspired by this direction: {fragments.get('action_fragment') or fragments.get('scene_fragment') or 'friendly commercial character pose'}. "
@@ -169,6 +177,7 @@ def build_provider_payload(
     batch_config: BatchPromptConfig | None = None,
     intent: str = "SCENE_EDIT",
     intent_reason: str | None = None,
+    subject_features: str | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """
     组装发往模型网关的标准化载荷，并同时返回一份可落库审计的快照。
@@ -223,6 +232,7 @@ def build_provider_payload(
             identity_lock=identity_lock,
             fragments=fragments,
             quality_template=quality_template,
+            subject_features=subject_features,
         )
     else:
         final_prompt = (
@@ -244,6 +254,7 @@ def build_provider_payload(
     prompt_snapshot = {
         "intent": normalized_intent,
         "intent_reason": intent_reason,
+        "subject_features": subject_features if normalized_intent == "POSE_VARIATION" else "",
         "identity_lock": identity_lock,
         "positive_template": positive_template,
         "negative_template": negative_template,
@@ -261,6 +272,7 @@ def build_provider_payload(
         "openai_model": settings.openai_image_model,
         "aliyun_model": settings.aliyun_wanx_model,
         "intent": normalized_intent,
+        "subject_features": subject_features if normalized_intent == "POSE_VARIATION" else "",
     }
 
     if negative_template:

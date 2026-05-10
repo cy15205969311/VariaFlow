@@ -32,6 +32,17 @@ def _extract_task_intent(slot: GenerationTask) -> tuple[str | None, str | None]:
     return intent, reason
 
 
+def _extract_subject_features(slot: GenerationTask) -> str | None:
+    snapshot = slot.prompt_snapshot_json or {}
+    subject_features = snapshot.get("subject_features")
+    vision_router = snapshot.get("vision_router") or {}
+    if not subject_features:
+        subject_features = vision_router.get("subject_features")
+    if isinstance(subject_features, str):
+        return subject_features.strip() or None
+    return None
+
+
 def _intent_label(intent: str | None) -> str | None:
     if intent == "SCENE_EDIT":
         return "场景重绘"
@@ -42,6 +53,7 @@ def _intent_label(intent: str | None) -> str | None:
 
 def _build_generation_task_slot_response(slot: GenerationTask) -> GenerationTaskSlotResponse:
     intent, reason = _extract_task_intent(slot)
+    subject_features = _extract_subject_features(slot)
     return GenerationTaskSlotResponse(
         id=slot.id,
         variant_index=slot.variant_index,
@@ -49,6 +61,7 @@ def _build_generation_task_slot_response(slot: GenerationTask) -> GenerationTask
         intent=intent,
         intent_label=_intent_label(intent),
         intent_reason=reason,
+        subject_features=subject_features,
         status=slot.status.value,
         provider_final=slot.provider_final,
         provider_route_final=slot.provider_route_final.value if slot.provider_route_final else None,

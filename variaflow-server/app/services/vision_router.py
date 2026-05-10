@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import re
@@ -7,7 +8,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import base64
 import httpx
 
 from app.core.config import settings
@@ -19,12 +19,16 @@ INTENT_POSE_VARIATION = "POSE_VARIATION"
 SUPPORTED_INTENTS = {INTENT_SCENE_EDIT, INTENT_POSE_VARIATION}
 
 VISION_SYSTEM_PROMPT = (
-    "你是一个专业的电商视觉特征分析系统。"
-    "请分析用户提供的图片主体，并严格按照以下规则进行二分类。"
-    "规则1 [SCENE_EDIT]：如果图片主体是独立的无生命商品，或者必须保持物理形态绝对不变的标品，请判定为 SCENE_EDIT。"
-    "规则2 [POSE_VARIATION]：如果图片主体是卡通IP、人物模特，或者明显期望改变姿势、表情、服装的生命体，请判定为 POSE_VARIATION。"
-    "你必须只输出合法 JSON，不要输出 markdown，不要输出解释。"
-    '输出格式示例：{"intent":"SCENE_EDIT","reason":"主体为标准商品，需要保持外形稳定"}'
+    "You are an ecommerce visual routing system. "
+    "Analyze the primary subject in the image and classify it into exactly one intent. "
+    "Return only valid JSON with the keys intent, reason, and subject_features. "
+    "Use SCENE_EDIT for inanimate products or standard merchandise whose physical shape must stay unchanged. "
+    "Use POSE_VARIATION for cartoon IP, mascots, animals, dolls, characters, or people whose pose, expression, styling, or outfit may vary. "
+    "For POSE_VARIATION, subject_features must be a detailed English description of stable identity traits only, "
+    "including species, rendering style, face structure, fur or material texture, color palette, body proportions, and signature accessories. "
+    "Do not mention the current pose, gesture, camera angle, background, or temporary clothing unless it is a permanent identity trait. "
+    "For SCENE_EDIT, subject_features must be an empty string. "
+    'Example: {"intent":"POSE_VARIATION","reason":"cartoon mascot character with editable pose and outfit","subject_features":"3D chibi cartoon monkey, large brown eyes, fluffy light brown fur, big round ears, oversized head-to-body ratio"}'
 )
 
 JSON_OBJECT_PATTERN = re.compile(r"\{.*?\}", re.DOTALL)
@@ -35,6 +39,7 @@ class VisionRouteDecision:
     intent: str
     reason: str
     raw_text: str
+    subject_features: str = ""
     provider: str = "vision_router"
     model: str = settings.vision_model
     used_fallback: bool = False
@@ -72,6 +77,12 @@ def _normalize_intent(value: Any) -> str:
     return _default_intent()
 
 
+def _normalize_subject_features(value: Any, intent: str) -> str:
+    if intent != INTENT_POSE_VARIATION:
+        return ""
+    return re.sub(r"\s+", " ", str(value or "")).strip()
+
+
 def _image_to_data_url(image_bytes: bytes, source_image_name: str) -> str:
     suffix = Path(source_image_name).suffix.lower()
     mime_type = {
@@ -94,7 +105,10 @@ def _build_payload(image_data_url: str) -> dict[str, Any]:
                 "content": [
                     {
                         "type": "text",
-                        "text": "请判断该图片应该走 SCENE_EDIT 还是 POSE_VARIATION，并仅返回 JSON。",
+                        "text": (
+                            "Classify this image as SCENE_EDIT or POSE_VARIATION. "
+                            "Return only JSON with intent, reason, and subject_features."
+                        ),
                     },
                     {
                         "type": "image_url",
@@ -143,6 +157,7 @@ async def analyze_image_intent(
             intent=_default_intent(),
             reason="vision_router_disabled",
             raw_text="",
+            subject_features="",
             used_fallback=True,
         )
 
@@ -191,6 +206,7 @@ async def analyze_image_intent(
             intent=_default_intent(),
             reason=f"vision_router_error:{exc}",
             raw_text="",
+            subject_features="",
             used_fallback=True,
         )
 
@@ -199,10 +215,12 @@ async def analyze_image_intent(
         parsed = _extract_json_object(raw_text)
         intent = _normalize_intent(parsed.get("intent"))
         reason = str(parsed.get("reason") or "").strip() or "classified_by_model"
+        subject_features = _normalize_subject_features(parsed.get("subject_features"), intent)
         return VisionRouteDecision(
             intent=intent,
             reason=reason,
             raw_text=raw_text,
+            subject_features=subject_features,
             used_fallback=False,
         )
     except Exception as exc:
@@ -211,5 +229,6 @@ async def analyze_image_intent(
             intent=_default_intent(),
             reason=f"vision_router_parse_error:{exc}",
             raw_text="",
+            subject_features="",
             used_fallback=True,
         )
