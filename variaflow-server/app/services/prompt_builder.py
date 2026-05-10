@@ -147,6 +147,8 @@ def _build_pose_variation_prompt(
     fragments: dict[str, str],
     quality_template: str,
     subject_features: str | None = None,
+    style_features: str | None = None,
+    background_features: str | None = None,
 ) -> str:
     style_parts = [
         fragments.get("camera_fragment", "").strip(),
@@ -154,18 +156,30 @@ def _build_pose_variation_prompt(
         quality_template.strip(),
     ]
     style_suffix = ", ".join(part for part in style_parts if part)
-    feature_clause = ""
+    feature_clauses: list[str] = []
     if subject_features and subject_features.strip():
-        feature_clause = (
-            "The exact core identity must match these stable features: "
-            f"{subject_features.strip()}. "
+        feature_clauses.append(
+            "Character exact identity matching: "
+            f"[{subject_features.strip()}]."
         )
+    if style_features and style_features.strip():
+        feature_clauses.append(
+            "Style strictly matching: "
+            f"[{style_features.strip()}]."
+        )
+    if background_features and background_features.strip():
+        feature_clauses.append(
+            "Background strictly matching: "
+            f"[{background_features.strip()}]."
+        )
+    feature_clause = " ".join(feature_clauses)
     return (
-        "Character variation image generation. Keep the same core subject identity from the reference image. "
-        f"{feature_clause}"
+        "A highly detailed image variation based on the reference character. "
+        "Keep the same core subject identity from the reference image. "
+        f"{feature_clause} "
         f"{identity_lock}. "
         "You may change pose, gesture, styling, or clothing while preserving face, species, palette, silhouette, and brand-defining details. "
-        f"Create a new expressive variant inspired by this direction: {fragments.get('action_fragment') or fragments.get('scene_fragment') or 'friendly commercial character pose'}. "
+        f"Generate this exact character performing a new expressive variation inspired by: {fragments.get('action_fragment') or fragments.get('scene_fragment') or 'friendly commercial character pose'}. "
         f"{style_suffix}"
     ).strip()
 
@@ -178,6 +192,8 @@ def build_provider_payload(
     intent: str = "SCENE_EDIT",
     intent_reason: str | None = None,
     subject_features: str | None = None,
+    style_features: str | None = None,
+    background_features: str | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """
     组装发往模型网关的标准化载荷，并同时返回一份可落库审计的快照。
@@ -233,6 +249,8 @@ def build_provider_payload(
             fragments=fragments,
             quality_template=quality_template,
             subject_features=subject_features,
+            style_features=style_features,
+            background_features=background_features,
         )
     else:
         final_prompt = (
@@ -255,6 +273,8 @@ def build_provider_payload(
         "intent": normalized_intent,
         "intent_reason": intent_reason,
         "subject_features": subject_features if normalized_intent == "POSE_VARIATION" else "",
+        "style_features": style_features if normalized_intent == "POSE_VARIATION" else "",
+        "background_features": background_features if normalized_intent == "POSE_VARIATION" else "",
         "identity_lock": identity_lock,
         "positive_template": positive_template,
         "negative_template": negative_template,
@@ -273,6 +293,8 @@ def build_provider_payload(
         "aliyun_model": settings.aliyun_wanx_model,
         "intent": normalized_intent,
         "subject_features": subject_features if normalized_intent == "POSE_VARIATION" else "",
+        "style_features": style_features if normalized_intent == "POSE_VARIATION" else "",
+        "background_features": background_features if normalized_intent == "POSE_VARIATION" else "",
     }
 
     if negative_template:

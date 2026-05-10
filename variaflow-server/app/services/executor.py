@@ -140,16 +140,24 @@ async def _prepare_execution_context(
         intent=vision_decision.intent,
         intent_reason=vision_decision.reason,
         subject_features=vision_decision.subject_features,
+        style_features=vision_decision.style_features,
+        background_features=vision_decision.background_features,
     )
     payload["vision_route_intent"] = vision_decision.intent
     payload["vision_route_reason"] = vision_decision.reason
     payload["subject_features"] = vision_decision.subject_features
+    payload["style_features"] = vision_decision.style_features
+    payload["background_features"] = vision_decision.background_features
     payload["vision_route_used_fallback"] = vision_decision.used_fallback
     prompt_snapshot["subject_features"] = vision_decision.subject_features
+    prompt_snapshot["style_features"] = vision_decision.style_features
+    prompt_snapshot["background_features"] = vision_decision.background_features
     prompt_snapshot["vision_router"] = {
         "intent": vision_decision.intent,
         "reason": vision_decision.reason,
         "subject_features": vision_decision.subject_features,
+        "style_features": vision_decision.style_features,
+        "background_features": vision_decision.background_features,
         "used_fallback": vision_decision.used_fallback,
         "model": vision_decision.model,
         "provider": vision_decision.provider,

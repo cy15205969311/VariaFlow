@@ -90,14 +90,16 @@ data/batch_<batch_code>/
 ## 智能双轨与特征注入
 - 视觉识别链路与生图链路已经解耦：
   - 视觉识别使用 `VARIAFLOW_VISION_API_URL` + `VARIAFLOW_VISION_MODEL`
-  - 当前实测配置为 `gpt-5.4` 兼容 `chat/completions`
+  - 默认示例配置为 `mimo-v2-omni`，也可以切换到其他兼容 `/v1/chat/completions` 的视觉模型
   - 生图仍使用 `VARIAFLOW_OPENAI_IMAGE_MODEL=gpt-image-2`
-- 视觉路由会输出三个核心字段：
+- 视觉路由会输出五个核心字段：
   - `intent`: `SCENE_EDIT` 或 `POSE_VARIATION`
   - `reason`: 路由原因
   - `subject_features`: 仅在 `POSE_VARIATION` 时返回，描述角色稳定身份特征的英文短语
-- `subject_features` 会被写入任务 `prompt_snapshot_json`，并透传到任务列表 API
-- 当任务命中 `POSE_VARIATION` 时，Prompt Builder 会把 `subject_features` 强注入到最终提示词中，用于尽量锁定 IP 主体的一致性
+  - `style_features`: 仅在 `POSE_VARIATION` 时返回，描述渲染风格、材质、光影语义
+  - `background_features`: 仅在 `POSE_VARIATION` 时返回，描述原图背景环境与色调
+- 这三类特征会被写入任务 `prompt_snapshot_json`，并透传到任务列表 API
+- 当任务命中 `POSE_VARIATION` 时，Prompt Builder 会同时把 `subject_features`、`style_features`、`background_features` 强注入到最终提示词中，用于尽量锁定 IP 主体一致性、画风和原始场景氛围
 - 当前双轨执行策略：
   - `SCENE_EDIT` -> `/v1/images/edits`
   - `POSE_VARIATION` -> `/v1/images/generations`

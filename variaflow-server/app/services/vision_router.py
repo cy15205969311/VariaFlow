@@ -21,14 +21,16 @@ SUPPORTED_INTENTS = {INTENT_SCENE_EDIT, INTENT_POSE_VARIATION}
 VISION_SYSTEM_PROMPT = (
     "You are an ecommerce visual routing system. "
     "Analyze the primary subject in the image and classify it into exactly one intent. "
-    "Return only valid JSON with the keys intent, reason, and subject_features. "
+    "Return only valid JSON with the keys intent, reason, subject_features, style_features, and background_features. "
     "Use SCENE_EDIT for inanimate products or standard merchandise whose physical shape must stay unchanged. "
     "Use POSE_VARIATION for cartoon IP, mascots, animals, dolls, characters, or people whose pose, expression, styling, or outfit may vary. "
     "For POSE_VARIATION, subject_features must be a detailed English description of stable identity traits only, "
     "including species, rendering style, face structure, fur or material texture, color palette, body proportions, and signature accessories. "
+    "For POSE_VARIATION, style_features must describe the stable visual style such as 3D toy render, photorealistic studio photo, cel shading, lighting mood, and material rendering. "
+    "For POSE_VARIATION, background_features must describe the original background environment, color atmosphere, and scene context. "
     "Do not mention the current pose, gesture, camera angle, background, or temporary clothing unless it is a permanent identity trait. "
-    "For SCENE_EDIT, subject_features must be an empty string. "
-    'Example: {"intent":"POSE_VARIATION","reason":"cartoon mascot character with editable pose and outfit","subject_features":"3D chibi cartoon monkey, large brown eyes, fluffy light brown fur, big round ears, oversized head-to-body ratio"}'
+    "For SCENE_EDIT, subject_features, style_features, and background_features must all be empty strings. "
+    'Example: {"intent":"POSE_VARIATION","reason":"cartoon mascot character with editable pose and outfit","subject_features":"3D chibi cartoon monkey, large brown eyes, fluffy light brown fur, big round ears, oversized head-to-body ratio","style_features":"polished 3D blind-box render, soft global illumination, glossy collectible toy finish","background_features":"warm indoor studio backdrop with clean gradient and soft ambient shadows"}'
 )
 
 JSON_OBJECT_PATTERN = re.compile(r"\{.*?\}", re.DOTALL)
@@ -40,6 +42,8 @@ class VisionRouteDecision:
     reason: str
     raw_text: str
     subject_features: str = ""
+    style_features: str = ""
+    background_features: str = ""
     provider: str = "vision_router"
     model: str = settings.vision_model
     used_fallback: bool = False
@@ -83,6 +87,12 @@ def _normalize_subject_features(value: Any, intent: str) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip()
 
 
+def _normalize_feature_text(value: Any, intent: str) -> str:
+    if intent != INTENT_POSE_VARIATION:
+        return ""
+    return re.sub(r"\s+", " ", str(value or "")).strip()
+
+
 def _image_to_data_url(image_bytes: bytes, source_image_name: str) -> str:
     suffix = Path(source_image_name).suffix.lower()
     mime_type = {
@@ -107,7 +117,7 @@ def _build_payload(image_data_url: str) -> dict[str, Any]:
                         "type": "text",
                         "text": (
                             "Classify this image as SCENE_EDIT or POSE_VARIATION. "
-                            "Return only JSON with intent, reason, and subject_features."
+                            "Return only JSON with intent, reason, subject_features, style_features, and background_features."
                         ),
                     },
                     {
@@ -158,6 +168,8 @@ async def analyze_image_intent(
             reason="vision_router_disabled",
             raw_text="",
             subject_features="",
+            style_features="",
+            background_features="",
             used_fallback=True,
         )
 
@@ -207,6 +219,8 @@ async def analyze_image_intent(
             reason=f"vision_router_error:{exc}",
             raw_text="",
             subject_features="",
+            style_features="",
+            background_features="",
             used_fallback=True,
         )
 
@@ -216,11 +230,15 @@ async def analyze_image_intent(
         intent = _normalize_intent(parsed.get("intent"))
         reason = str(parsed.get("reason") or "").strip() or "classified_by_model"
         subject_features = _normalize_subject_features(parsed.get("subject_features"), intent)
+        style_features = _normalize_feature_text(parsed.get("style_features"), intent)
+        background_features = _normalize_feature_text(parsed.get("background_features"), intent)
         return VisionRouteDecision(
             intent=intent,
             reason=reason,
             raw_text=raw_text,
             subject_features=subject_features,
+            style_features=style_features,
+            background_features=background_features,
             used_fallback=False,
         )
     except Exception as exc:
@@ -230,5 +248,7 @@ async def analyze_image_intent(
             reason=f"vision_router_parse_error:{exc}",
             raw_text="",
             subject_features="",
+            style_features="",
+            background_features="",
             used_fallback=True,
         )

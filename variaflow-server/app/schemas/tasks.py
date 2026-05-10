@@ -15,6 +15,8 @@ class GenerationTaskSlotResponse(BaseModel):
     intent_label: str | None = None
     intent_reason: str | None = None
     subject_features: str | None = None
+    style_features: str | None = None
+    background_features: str | None = None
     status: str
     provider_final: str | None = None
     provider_route_final: str | None = None

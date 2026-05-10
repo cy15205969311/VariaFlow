@@ -64,12 +64,22 @@ def test_build_provider_payload_switches_prompt_for_pose_variation() -> None:
         intent="POSE_VARIATION",
         intent_reason="cartoon_character",
         subject_features="3D chibi cartoon monkey, large brown eyes, fluffy light brown fur",
+        style_features="polished 3D blind-box render, glossy toy material",
+        background_features="soft warm indoor studio gradient background",
     )
 
     assert payload["intent"] == "POSE_VARIATION"
     assert snapshot["intent"] == "POSE_VARIATION"
     assert snapshot["subject_features"] == "3D chibi cartoon monkey, large brown eyes, fluffy light brown fur"
+    assert snapshot["style_features"] == "polished 3D blind-box render, glossy toy material"
+    assert snapshot["background_features"] == "soft warm indoor studio gradient background"
     assert payload["subject_features"] == "3D chibi cartoon monkey, large brown eyes, fluffy light brown fur"
+    assert payload["style_features"] == "polished 3D blind-box render, glossy toy material"
+    assert payload["background_features"] == "soft warm indoor studio gradient background"
     assert "You may change pose" in payload["prompt"]
-    assert "The exact core identity must match these stable features" in payload["prompt"]
+    assert "Character exact identity matching" in payload["prompt"]
+    assert "Style strictly matching" in payload["prompt"]
+    assert "Background strictly matching" in payload["prompt"]
     assert "3D chibi cartoon monkey, large brown eyes, fluffy light brown fur" in payload["prompt"]
+    assert "polished 3D blind-box render, glossy toy material" in payload["prompt"]
+    assert "soft warm indoor studio gradient background" in payload["prompt"]

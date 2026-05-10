@@ -43,6 +43,17 @@ def _extract_subject_features(slot: GenerationTask) -> str | None:
     return None
 
 
+def _extract_snapshot_text(slot: GenerationTask, key: str) -> str | None:
+    snapshot = slot.prompt_snapshot_json or {}
+    value = snapshot.get(key)
+    vision_router = snapshot.get("vision_router") or {}
+    if not value:
+        value = vision_router.get(key)
+    if isinstance(value, str):
+        return value.strip() or None
+    return None
+
+
 def _intent_label(intent: str | None) -> str | None:
     if intent == "SCENE_EDIT":
         return "场景重绘"
@@ -54,6 +65,8 @@ def _intent_label(intent: str | None) -> str | None:
 def _build_generation_task_slot_response(slot: GenerationTask) -> GenerationTaskSlotResponse:
     intent, reason = _extract_task_intent(slot)
     subject_features = _extract_subject_features(slot)
+    style_features = _extract_snapshot_text(slot, "style_features")
+    background_features = _extract_snapshot_text(slot, "background_features")
     return GenerationTaskSlotResponse(
         id=slot.id,
         variant_index=slot.variant_index,
@@ -62,6 +75,8 @@ def _build_generation_task_slot_response(slot: GenerationTask) -> GenerationTask
         intent_label=_intent_label(intent),
         intent_reason=reason,
         subject_features=subject_features,
+        style_features=style_features,
+        background_features=background_features,
         status=slot.status.value,
         provider_final=slot.provider_final,
         provider_route_final=slot.provider_route_final.value if slot.provider_route_final else None,
