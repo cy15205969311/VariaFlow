@@ -10,7 +10,9 @@ import httpx
 from PIL import Image, ImageDraw
 
 from app.core.config import settings
+from app.gateways.adapters.aliyun_adapter import AliyunAdapter
 from app.gateways.adapters.openai_adapter import OpenAIImageAdapter
+from app.gateways.adapters.openai_variation_adapter import OpenAIVariationAdapter
 from app.gateways.adapters.wanxiang_adapter import WanxiangAdapter
 from app.gateways.shared import ProviderResult
 from app.models.enums import ProviderRoute
@@ -58,7 +60,11 @@ class MockAIAdapter:
 
     def __init__(self, provider_route: ProviderRoute) -> None:
         self.provider_route = provider_route
-        self.provider_code = "mock_openai_image_2" if provider_route == ProviderRoute.PRIMARY else "mock_aliyun_wanx"
+        preferred_provider = settings.image_provider.strip().lower()
+        if provider_route == ProviderRoute.PRIMARY:
+            self.provider_code = "mock_aliyun_wanx" if preferred_provider == "aliyun" else "mock_openai_image_edit"
+        else:
+            self.provider_code = "mock_openai_image_edit" if preferred_provider == "aliyun" else "mock_aliyun_wanx"
         self.request_url = f"mock://{provider_route.value}"
 
     async def generate(
@@ -66,8 +72,9 @@ class MockAIAdapter:
         *,
         client: httpx.AsyncClient,
         payload_json: dict[str, Any],
+        source_image_bytes: bytes | None = None,
     ) -> ProviderResult:
-        del client, payload_json
+        del client, payload_json, source_image_bytes
         await asyncio.sleep(random.uniform(2.0, 5.0))
 
         if random.random() < settings.mock_failure_rate:
@@ -98,12 +105,21 @@ class MockAIAdapter:
         return ProviderResult(image_bytes=image_bytes, meta=meta)
 
 
-def _build_adapter(provider_route: ProviderRoute) -> Any:
+def _build_adapter(provider_route: ProviderRoute, payload_json: dict[str, Any]) -> Any:
     if settings.use_mock_ai:
         return MockAIAdapter(provider_route)
-    if provider_route == ProviderRoute.FALLBACK:
-        return WanxiangAdapter()
-    return OpenAIImageAdapter()
+
+    preferred_provider = settings.image_provider.strip().lower()
+    request_intent = str(payload_json.get("intent") or "").strip().upper()
+    if provider_route == ProviderRoute.FALLBACK and not settings.provider_enable_fallback:
+        raise ValueError("Provider fallback is disabled")
+    if preferred_provider == "aliyun":
+        return AliyunAdapter() if provider_route == ProviderRoute.PRIMARY else OpenAIImageAdapter()
+    if preferred_provider == "wanxiang_legacy":
+        return WanxiangAdapter() if provider_route == ProviderRoute.PRIMARY else OpenAIImageAdapter()
+    if provider_route == ProviderRoute.PRIMARY and request_intent == "POSE_VARIATION":
+        return OpenAIVariationAdapter()
+    return OpenAIImageAdapter() if provider_route == ProviderRoute.PRIMARY else AliyunAdapter()
 
 
 async def _call_single_provider(
@@ -111,10 +127,15 @@ async def _call_single_provider(
     client: httpx.AsyncClient,
     payload_json: dict[str, Any],
     provider_route: ProviderRoute,
+    source_image_bytes: bytes | None = None,
 ) -> tuple[bytes, dict[str, Any]]:
-    adapter = _build_adapter(provider_route)
+    adapter = _build_adapter(provider_route, payload_json)
     try:
-        result = await adapter.generate(client=client, payload_json=payload_json)
+        result = await adapter.generate(
+            client=client,
+            payload_json=payload_json,
+            source_image_bytes=source_image_bytes,
+        )
         return result.image_bytes, result.meta
     except Exception as exc:
         setattr(exc, "provider_route", provider_route.value)
@@ -125,6 +146,7 @@ async def _call_single_provider(
 async def call_ai_provider(
     payload_json: dict[str, Any],
     provider_route: ProviderRoute = ProviderRoute.PRIMARY,
+    source_image_bytes: bytes | None = None,
 ) -> tuple[bytes, dict[str, Any]]:
     """
     优先调用主链路，并在可重试的上游异常下透明切换到兜底链路。
@@ -141,6 +163,15 @@ async def call_ai_provider(
                 client=client,
                 payload_json=payload_json,
                 provider_route=ProviderRoute.FALLBACK,
+                source_image_bytes=source_image_bytes,
+            )
+
+        if not settings.provider_enable_fallback:
+            return await _call_single_provider(
+                client=client,
+                payload_json=payload_json,
+                provider_route=ProviderRoute.PRIMARY,
+                source_image_bytes=source_image_bytes,
             )
 
         switch_reason: str | None = None
@@ -149,6 +180,7 @@ async def call_ai_provider(
                 client=client,
                 payload_json=payload_json,
                 provider_route=ProviderRoute.PRIMARY,
+                source_image_bytes=source_image_bytes,
             )
         except httpx.TimeoutException:
             switch_reason = "primary_timeout"
@@ -166,6 +198,7 @@ async def call_ai_provider(
                 client=client,
                 payload_json=payload_json,
                 provider_route=ProviderRoute.FALLBACK,
+                source_image_bytes=source_image_bytes,
             )
         except Exception as exc:
             setattr(exc, "switch_reason", switch_reason)

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -39,13 +40,21 @@ from app.services.generation import finalize_generation_task
 from app.services.prompt_builder import build_provider_payload
 from app.services.qc_engine import QualityCheckResult
 from app.services.qc_engine import run_rules_qc
+from app.services.vision_router import analyze_image_intent
 
 DEFAULT_QC_CONFIG = {
-    "min_file_size_bytes": 51_200,
-    "min_width": 1024,
-    "min_height": 1024,
+    "min_file_size_bytes": settings.qc_min_file_size_bytes,
+    "min_width": settings.qc_min_width,
+    "min_height": settings.qc_min_height,
+    "min_total_pixels": settings.qc_min_total_pixels,
     "allowed_mime_types": {"image/png", "image/jpeg", "image/webp"},
 }
+MAX_ERROR_CODE_LENGTH = 64
+MAX_SWITCH_REASON_LENGTH = 64
+MAX_TASK_ERROR_MESSAGE_LENGTH = 1024
+MAX_ATTEMPT_ERROR_MESSAGE_LENGTH = 2048
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -63,6 +72,15 @@ class ExecutionContext:
 def _payload_hash(payload: dict[str, Any]) -> str:
     normalized = json.dumps(payload, sort_keys=True, ensure_ascii=True)
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def _truncate_text(value: str | None, max_length: int) -> str | None:
+    if value is None:
+        return None
+    text = str(value)
+    if len(text) <= max_length:
+        return text
+    return text[: max_length - 3] + "..."
 
 
 async def _load_generation_context(
@@ -108,12 +126,31 @@ async def _prepare_execution_context(
     task_id: int,
 ) -> ExecutionContext:
     task, prompt_profile, batch_config = await _load_generation_context(session, task_id)
+    source_image_path = Path(task.source_task.source_path)
+    source_image_bytes = await asyncio.to_thread(source_image_path.read_bytes)
+    vision_decision = await analyze_image_intent(
+        image_bytes=source_image_bytes,
+        source_image_name=task.source_task.source_name or source_image_path.name,
+    )
     payload, prompt_snapshot = build_provider_payload(
         task.source_task,
         task,
         prompt_profile,
         batch_config,
+        intent=vision_decision.intent,
+        intent_reason=vision_decision.reason,
     )
+    payload["vision_route_intent"] = vision_decision.intent
+    payload["vision_route_reason"] = vision_decision.reason
+    payload["vision_route_used_fallback"] = vision_decision.used_fallback
+    prompt_snapshot["vision_router"] = {
+        "intent": vision_decision.intent,
+        "reason": vision_decision.reason,
+        "used_fallback": vision_decision.used_fallback,
+        "model": vision_decision.model,
+        "provider": vision_decision.provider,
+        "raw_text": vision_decision.raw_text,
+    }
 
     task.prompt_snapshot_json = prompt_snapshot
     await session.commit()
@@ -138,7 +175,7 @@ async def _create_attempt_record(
     started_at: datetime,
     provider_route: ProviderRoute = ProviderRoute.PRIMARY,
     provider_code: str = "openai_image_2",
-    outcome: AttemptOutcome = AttemptOutcome.STARTED,
+    outcome: AttemptOutcome = AttemptOutcome.SUCCESS,
     error_code: str | None = None,
     error_message: str | None = None,
     latency_ms: int | None = None,
@@ -153,13 +190,13 @@ async def _create_attempt_record(
         request_payload_hash=_payload_hash(context.payload),
         request_payload_json=context.payload,
         started_at=started_at,
-        finished_at=datetime.utcnow() if outcome != AttemptOutcome.STARTED else None,
+        finished_at=started_at,
         latency_ms=latency_ms,
-        switch_reason=switch_reason,
+        switch_reason=_truncate_text(switch_reason, MAX_SWITCH_REASON_LENGTH),
         http_status=http_status,
         outcome=outcome,
-        error_code=error_code,
-        error_message=error_message,
+        error_code=_truncate_text(error_code, MAX_ERROR_CODE_LENGTH),
+        error_message=_truncate_text(error_message, MAX_ATTEMPT_ERROR_MESSAGE_LENGTH),
     )
     session.add(attempt)
     await session.commit()
@@ -278,6 +315,10 @@ async def _mark_task_for_retry_or_failure(
     response_meta: dict[str, Any] | None = None,
 ) -> None:
     task = (await session.execute(select(GenerationTask).where(GenerationTask.id == context.task_id))).scalar_one()
+    normalized_error_code = _truncate_text(error_code, MAX_ERROR_CODE_LENGTH)
+    normalized_error_message = _truncate_text(error_message, MAX_TASK_ERROR_MESSAGE_LENGTH) or "未知执行错误"
+    normalized_attempt_error_message = _truncate_text(error_message, MAX_ATTEMPT_ERROR_MESSAGE_LENGTH)
+    normalized_switch_reason = _truncate_text(switch_reason, MAX_SWITCH_REASON_LENGTH)
     attempt = (
         await session.execute(
             select(GenerationAttempt).where(
@@ -296,19 +337,22 @@ async def _mark_task_for_retry_or_failure(
             request_payload_hash=_payload_hash(context.payload),
             request_payload_json=context.payload,
             started_at=datetime.utcnow(),
-            outcome=AttemptOutcome.STARTED,
+            finished_at=datetime.utcnow(),
+            outcome=outcome,
+            error_code=normalized_error_code,
+            error_message=normalized_attempt_error_message,
         )
         session.add(attempt)
 
     attempt.provider_route = provider_route
     attempt.provider_code = provider_code
     attempt.http_status = http_status
-    attempt.switch_reason = switch_reason
+    attempt.switch_reason = normalized_switch_reason
     attempt.finished_at = datetime.utcnow()
     attempt.latency_ms = latency_ms
     attempt.outcome = outcome
-    attempt.error_code = error_code
-    attempt.error_message = error_message
+    attempt.error_code = normalized_error_code
+    attempt.error_message = normalized_attempt_error_message
     if response_meta:
         attempt.response_meta_json = response_meta
 
@@ -323,10 +367,10 @@ async def _mark_task_for_retry_or_failure(
         task.next_run_at = datetime.utcnow() + timedelta(seconds=min(60, 5 * max(task.attempt_count, 1)))
     task.lease_owner = None
     task.lease_until = None
-    task.last_error_code = error_code
-    task.last_error_message = error_message
+    task.last_error_code = normalized_error_code
+    task.last_error_message = normalized_error_message
     task.last_provider_http_status = http_status
-    task.last_switch_reason = switch_reason
+    task.last_switch_reason = normalized_switch_reason
     if outcome == AttemptOutcome.QC_FAILED:
         task.qc_status = QCStatus.FAILED
     if not should_retry:
@@ -367,15 +411,31 @@ async def process_generation_task(
                 session,
                 context=context,
                 started_at=started_at,
+                outcome=AttemptOutcome.SUCCESS,
             )
             attempt_id = attempt.id
 
         try:
-            image_bytes, response_meta = await call_ai_provider(context.payload, ProviderRoute.PRIMARY)
+            source_image_path = Path(context.payload["source_image_path"])
+            source_image_bytes = await asyncio.to_thread(source_image_path.read_bytes)
+
+            image_bytes, response_meta = await call_ai_provider(
+                context.payload,
+                ProviderRoute.PRIMARY,
+                source_image_bytes=source_image_bytes,
+            )
             provider_route = ProviderRoute(response_meta.get("provider_route", ProviderRoute.PRIMARY.value))
             provider_code = str(response_meta.get("provider_code", provider_code))
             switch_reason = response_meta.get("switch_reason")
             http_status = response_meta.get("http_status")
+            if settings.provider_debug_log:
+                logger.info(
+                    "Provider image ready task_id=%s provider=%s route=%s bytes=%s",
+                    context.task_id,
+                    provider_code,
+                    provider_route.value,
+                    len(image_bytes),
+                )
         except Exception as exc:
             latency_ms = int((datetime.utcnow() - started_at).total_seconds() * 1000)
             switch_reason = getattr(exc, "switch_reason", switch_reason)
@@ -420,6 +480,7 @@ async def process_generation_task(
             DEFAULT_QC_CONFIG["min_file_size_bytes"],
             DEFAULT_QC_CONFIG["min_width"],
             DEFAULT_QC_CONFIG["min_height"],
+            DEFAULT_QC_CONFIG["min_total_pixels"],
             DEFAULT_QC_CONFIG["allowed_mime_types"],
         )
         latency_ms = int((datetime.utcnow() - started_at).total_seconds() * 1000)
@@ -443,6 +504,17 @@ async def process_generation_task(
             await _persist_qc_result(session, task_id=context.task_id, attempt_id=attempt.id, qc_result=qc_result)
 
         if not qc_result.passed:
+            logger.warning(
+                "QC failed task_id=%s provider=%s fail_codes=%s width=%s height=%s mime=%s bytes=%s temp=%s",
+                context.task_id,
+                provider_code,
+                qc_result.fail_codes,
+                qc_result.width,
+                qc_result.height,
+                qc_result.mime_type,
+                qc_result.file_size_bytes,
+                temp_file,
+            )
             async with db_session_factory() as session:
                 task_row = (await session.execute(select(GenerationTask).where(GenerationTask.id == context.task_id))).scalar_one()
                 task_row.qc_status = QCStatus.FAILED
@@ -464,6 +536,17 @@ async def process_generation_task(
             if temp_file is not None and temp_file.exists():
                 await asyncio.to_thread(temp_file.unlink, True)
             return
+
+        if settings.provider_debug_log:
+            logger.info(
+                "QC passed task_id=%s width=%s height=%s mime=%s bytes=%s temp=%s",
+                context.task_id,
+                qc_result.width,
+                qc_result.height,
+                qc_result.mime_type,
+                qc_result.file_size_bytes,
+                temp_file,
+            )
 
         async with db_session_factory() as session:
             statement = (

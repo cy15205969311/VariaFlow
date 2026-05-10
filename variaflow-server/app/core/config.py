@@ -4,6 +4,7 @@ import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 from dotenv import load_dotenv
 
@@ -39,6 +40,108 @@ def _get_env(name: str, default: str | None = None, aliases: tuple[str, ...] = (
     return default
 
 
+def _normalize_openai_image_edit_url(value: str | None) -> str:
+    default_url = "https://api.openai.com/v1/images/edits"
+    if value is None:
+        return default_url
+
+    normalized = value.strip()
+    if not normalized:
+        return default_url
+
+    lower = normalized.lower().rstrip("/")
+    if lower.endswith("/images/edits"):
+        return normalized.rstrip("/")
+    if lower.endswith("/v1"):
+        return normalized.rstrip("/") + "/images/edits"
+
+    parsed = urlsplit(normalized)
+    if not parsed.scheme or not parsed.netloc:
+        return normalized
+
+    path = parsed.path.rstrip("/")
+    if path in {"", "/"}:
+        path = "/v1/images/edits"
+    else:
+        path = f"{path}/images/edits"
+
+    return urlunsplit((parsed.scheme, parsed.netloc, path, parsed.query, parsed.fragment))
+
+
+def _normalize_chat_completions_url(value: str | None) -> str:
+    default_url = "https://www.onetopai.asia/v1/chat/completions"
+    if value is None:
+        return default_url
+
+    normalized = value.strip()
+    if not normalized:
+        return default_url
+
+    lower = normalized.lower().rstrip("/")
+    if lower.endswith("/chat/completions"):
+        return normalized.rstrip("/")
+    if lower.endswith("/v1"):
+        return normalized.rstrip("/") + "/chat/completions"
+
+    parsed = urlsplit(normalized)
+    if not parsed.scheme or not parsed.netloc:
+        return normalized
+
+    path = parsed.path.rstrip("/")
+    if path in {"", "/"}:
+        path = "/v1/chat/completions"
+    else:
+        path = f"{path}/chat/completions"
+
+    return urlunsplit((parsed.scheme, parsed.netloc, path, parsed.query, parsed.fragment))
+
+
+def _normalize_openai_image_generation_url(value: str | None) -> str:
+    default_url = "https://api.openai.com/v1/images/generations"
+    if value is None:
+        return default_url
+
+    normalized = value.strip()
+    if not normalized:
+        return default_url
+
+    lower = normalized.lower().rstrip("/")
+    if lower.endswith("/images/generations"):
+        return normalized.rstrip("/")
+    if lower.endswith("/images/edits"):
+        return normalized.rstrip("/")[: -len("/images/edits")] + "/images/generations"
+    if lower.endswith("/v1"):
+        return normalized.rstrip("/") + "/images/generations"
+
+    parsed = urlsplit(normalized)
+    if not parsed.scheme or not parsed.netloc:
+        return normalized
+
+    path = parsed.path.rstrip("/")
+    if path in {"", "/"}:
+        path = "/v1/images/generations"
+    else:
+        path = f"{path}/images/generations"
+
+    return urlunsplit((parsed.scheme, parsed.netloc, path, parsed.query, parsed.fragment))
+
+
+def _get_openai_image_generation_url() -> str:
+    explicit_generation_url = _get_env(
+        "VARIAFLOW_OPENAI_IMAGE_GENERATION_URL",
+        aliases=("VARIAFLOW_OPENAI_IMAGE_2_URL",),
+    )
+    if explicit_generation_url is not None:
+        return _normalize_openai_image_generation_url(explicit_generation_url)
+
+    edit_url = _get_env(
+        "VARIAFLOW_OPENAI_IMAGE_EDIT_URL",
+        "https://api.openai.com/v1/images/edits",
+        aliases=("OPENAI_BASE_URL",),
+    )
+    return _normalize_openai_image_generation_url(edit_url)
+
+
 def _get_app_env() -> str:
     return _get_env("VARIAFLOW_APP_ENV", "development") or "development"
 
@@ -61,6 +164,17 @@ def _get_primary_database_url() -> str:
 
 def _get_test_database_url() -> str | None:
     return _get_env("VARIAFLOW_TEST_DATABASE_URL")
+
+
+def _get_vision_api_key() -> str:
+    return (
+        _get_env(
+            "VARIAFLOW_VISION_API_KEY",
+            "",
+            aliases=("VARIAFLOW_OPENAI_IMAGE_API_KEY", "OPENAI_API_KEY"),
+        )
+        or ""
+    )
 
 
 def _get_effective_database_url() -> str:
@@ -110,9 +224,18 @@ class Settings:
     worker_lease_seconds: int = _get_int("VARIAFLOW_WORKER_LEASE_SECONDS", 120)
     worker_name: str = os.getenv("VARIAFLOW_WORKER_NAME", "variaflow-worker-1")
     scheduler_max_inflight_tasks: int = _get_int("VARIAFLOW_SCHEDULER_MAX_INFLIGHT_TASKS", 1)
+    db_supports_skip_locked: bool = _get_bool("VARIAFLOW_DB_SUPPORTS_SKIP_LOCKED", False)
+    provider_debug_log: bool = _get_bool("VARIAFLOW_PROVIDER_DEBUG_LOG", False)
     provider_request_timeout_seconds: float = float(
         os.getenv("VARIAFLOW_PROVIDER_REQUEST_TIMEOUT_SECONDS", "90")
     )
+    provider_enable_fallback: bool = _get_bool("VARIAFLOW_PROVIDER_ENABLE_FALLBACK", False)
+    qc_min_file_size_bytes: int = _get_int("VARIAFLOW_QC_MIN_FILE_SIZE_BYTES", 51_200)
+    qc_min_width: int = _get_int("VARIAFLOW_QC_MIN_WIDTH", 768)
+    qc_min_height: int = _get_int("VARIAFLOW_QC_MIN_HEIGHT", 752)
+    qc_min_total_pixels: int = _get_int("VARIAFLOW_QC_MIN_TOTAL_PIXELS", 577_536)
+    aliyun_use_sdk_for_imageedit: bool = _get_bool("VARIAFLOW_ALIYUN_USE_SDK_FOR_IMAGEEDIT", True)
+    image_provider: str = (_get_env("VARIAFLOW_IMAGE_PROVIDER", "openai") or "openai").strip().lower()
     use_mock_ai: bool = (
         (_get_env("VARIAFLOW_USE_MOCK_AI", aliases=("USE_MOCK_AI",)) or "true").strip().lower()
         in {"1", "true", "yes", "on"}
@@ -120,26 +243,65 @@ class Settings:
     mock_failure_rate: float = float(
         _get_env("VARIAFLOW_MOCK_FAILURE_RATE", "0.3", aliases=("MOCK_FAILURE_RATE",)) or "0.3"
     )
-    openai_image_2_url: str = _get_env(
-        "VARIAFLOW_OPENAI_IMAGE_2_URL",
-        "https://api.openai.com/v1/images/generations",
-        aliases=("OPENAI_BASE_URL",),
-    ) or "https://api.openai.com/v1/images/generations"
-    openai_image_2_model: str = _get_env(
-        "VARIAFLOW_OPENAI_IMAGE_2_MODEL",
-        "image-2",
-        aliases=("OPENAI_IMAGE_MODEL",),
-    ) or "image-2"
-    openai_image_2_api_key: str = _get_env(
-        "VARIAFLOW_OPENAI_IMAGE_2_API_KEY",
+    openai_image_edit_url: str = _normalize_openai_image_edit_url(
+        _get_env(
+            "VARIAFLOW_OPENAI_IMAGE_EDIT_URL",
+            "https://api.openai.com/v1/images/edits",
+            aliases=("OPENAI_BASE_URL", "VARIAFLOW_OPENAI_IMAGE_2_URL"),
+        )
+    )
+    openai_image_model: str = _get_env(
+        "VARIAFLOW_OPENAI_IMAGE_MODEL",
+        "gpt-image-2",
+        aliases=("OPENAI_IMAGE_MODEL", "VARIAFLOW_OPENAI_IMAGE_2_MODEL"),
+    ) or "gpt-image-2"
+    openai_image_generation_url: str = field(default_factory=_get_openai_image_generation_url)
+    openai_image_api_key: str = _get_env(
+        "VARIAFLOW_OPENAI_IMAGE_API_KEY",
         "",
-        aliases=("OPENAI_API_KEY",),
+        aliases=("OPENAI_API_KEY", "VARIAFLOW_OPENAI_IMAGE_2_API_KEY"),
     ) or ""
+    vision_router_enabled: bool = _get_bool("VARIAFLOW_VISION_ROUTER_ENABLED", True)
+    vision_api_url: str = _normalize_chat_completions_url(
+        _get_env(
+            "VARIAFLOW_VISION_API_URL",
+            "https://www.onetopai.asia/v1/chat/completions",
+        )
+    )
+    vision_model: str = _get_env(
+        "VARIAFLOW_VISION_MODEL",
+        "gpt5.4",
+    ) or "gpt5.4"
+    vision_api_key: str = field(default_factory=_get_vision_api_key)
+    vision_request_timeout_seconds: float = _get_float(
+        "VARIAFLOW_VISION_REQUEST_TIMEOUT_SECONDS",
+        45.0,
+    )
+    vision_default_intent: str = (
+        _get_env("VARIAFLOW_VISION_DEFAULT_INTENT", "SCENE_EDIT") or "SCENE_EDIT"
+    ).strip().upper()
     aliyun_wanx_url: str = _get_env(
         "VARIAFLOW_ALIYUN_WANX_URL",
-        "https://dashscope.aliyuncs.com/api/v1/services/aigc/text2image/image-synthesis",
+        "https://dashscope.aliyuncs.com/api/v1/services/aigc/image-generation/generation",
         aliases=("WANX_BASE_URL",),
-    ) or "https://dashscope.aliyuncs.com/api/v1/services/aigc/text2image/image-synthesis"
+    ) or "https://dashscope.aliyuncs.com/api/v1/services/aigc/image-generation/generation"
+    aliyun_wanx_imageedit_url: str = _get_env(
+        "VARIAFLOW_ALIYUN_WANX_IMAGEEDIT_URL",
+        "https://dashscope.aliyuncs.com/api/v1/services/aigc/image2image/image-synthesis",
+    ) or "https://dashscope.aliyuncs.com/api/v1/services/aigc/image2image/image-synthesis"
+    aliyun_wanx_model: str = _get_env(
+        "VARIAFLOW_ALIYUN_WANX_MODEL",
+        "wan2.7-image-pro",
+        aliases=("WANX_MODEL",),
+    ) or "wan2.7-image-pro"
+    aliyun_imageedit_function: str = _get_env(
+        "VARIAFLOW_ALIYUN_IMAGEEDIT_FUNCTION",
+        "description_edit",
+    ) or "description_edit"
+    aliyun_imageedit_strength: float = _get_float(
+        "VARIAFLOW_ALIYUN_IMAGEEDIT_STRENGTH",
+        0.35,
+    )
     aliyun_wanx_api_key: str = _get_env(
         "VARIAFLOW_ALIYUN_WANX_API_KEY",
         "",

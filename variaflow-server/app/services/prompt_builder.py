@@ -3,46 +3,53 @@ from __future__ import annotations
 import random
 from typing import Any
 
+from app.core.config import settings
 from app.models.tasks import BatchPromptConfig, GenerationTask, PromptProfile, PromptVariableOption, SourceTask
 
 DEFAULT_POSITIVE_TEMPLATE = (
-    "Keep the subject identity consistent with the reference image. "
-    "{{identity_lock}}. Apply the requested variation: {{variant_directive}}."
+    "Product photography. A high-quality image of the provided subject {{variant_directive}}. "
+    "CRITICAL: The subject is already provided. {{identity_lock}}. "
+    "DO NOT modify, warp, recolor, restyle, crop, or change the subject's shape, texture, silhouette, or brand details. "
+    "ONLY generate the background, environment, reflections, and natural shadows that match the scene lighting. "
+    "Keep the subject centered, complete, and commercially usable."
 )
 DEFAULT_NEGATIVE_TEMPLATE = (
-    "no extra limbs, no extra fingers, no blur, no watermark, "
-    "no text overlay, no duplicated subject, no cropped product"
+    "no subject deformation, no extra limbs, no extra fingers, no blur, no watermark, "
+    "no text overlay, no duplicated subject, no cropped product, no subject recolor, no subject replacement"
 )
 DEFAULT_IDENTITY_TEMPLATE = "Preserve the exact subject identity from the reference image."
 DEFAULT_QUALITY_TEMPLATE = (
-    "high detail, clean commercial composition, complete subject, "
-    "sharp focus, marketplace-ready hero image"
+    "photorealistic, premium ecommerce hero image, realistic lighting, natural contact shadow, "
+    "clean product composition, sharp focus, marketplace-ready, high detail"
 )
 DEFAULT_VARIANT_LIBRARY: dict[str, list[str]] = {
     "action": [
-        "raise one hand in a friendly pose",
-        "stand with a slight turn and confident posture",
-        "lean forward in a lively commercial pose",
+        "on a clean wooden table in a sunlit cozy cafe, shallow depth of field, cinematic lighting",
+        "placed on white sand at a tropical beach, clear blue sky, ocean waves in background, bright sunlight",
+        "on a dark slate podium with neon cyberpunk city lights in the blurred background, moody and futuristic",
+        "in a minimalist studio setup with soft pastel gradient background, elegant shadows, product photography",
     ],
     "outfit": [
-        "wear a casual streetwear outfit",
-        "wear a sporty coordinated outfit",
-        "wear a clean premium retail outfit",
+        "on a clean wooden table in a sunlit cozy cafe, shallow depth of field, cinematic lighting",
+        "placed on white sand at a tropical beach, clear blue sky, ocean waves in background, bright sunlight",
+        "on a dark slate podium with neon cyberpunk city lights in the blurred background, moody and futuristic",
+        "in a minimalist studio setup with soft pastel gradient background, elegant shadows, product photography",
     ],
     "scene": [
-        "place the subject in a bright lifestyle studio scene",
-        "place the subject in a playful retail display scene",
-        "place the subject in a clean seasonal campaign backdrop",
+        "on a clean wooden table in a sunlit cozy cafe, shallow depth of field, cinematic lighting",
+        "placed on white sand at a tropical beach, clear blue sky, ocean waves in background, bright sunlight",
+        "on a dark slate podium with neon cyberpunk city lights in the blurred background, moody and futuristic",
+        "in a minimalist studio setup with soft pastel gradient background, elegant shadows, product photography",
     ],
     "camera": [
-        "front-facing hero shot",
-        "slight three-quarter angle",
-        "medium close-up commercial framing",
+        "front-facing centered product framing",
+        "clean commercial hero shot",
+        "balanced composition with natural perspective",
     ],
     "style": [
-        "high-end ecommerce hero image",
-        "clean marketplace product visual",
-        "premium catalog presentation",
+        "high-end ecommerce background integration",
+        "premium marketplace-ready product presentation",
+        "realistic environmental background blending",
     ],
 }
 
@@ -117,20 +124,42 @@ def _pick_variants(
 
 def _build_variant_directive(axis: str, fragments: dict[str, str]) -> str:
     if axis == "action":
-        return fragments["action_fragment"]
+        return f"in the following background scene: {fragments['action_fragment']}"
     if axis == "outfit":
-        return fragments["outfit_fragment"]
+        return f"in the following background scene: {fragments['outfit_fragment']}"
     if axis == "scene":
-        return fragments["scene_fragment"]
-    return ", ".join(
-        fragment
-        for fragment in [
-            fragments["action_fragment"],
-            fragments["outfit_fragment"],
-            fragments["scene_fragment"],
-        ]
-        if fragment
-    )
+        return f"in the following background scene: {fragments['scene_fragment']}"
+
+    scene_fragments: list[str] = []
+    for key in ("scene_fragment", "action_fragment", "outfit_fragment"):
+        value = fragments.get(key, "").strip()
+        if value and value not in scene_fragments:
+            scene_fragments.append(value)
+
+    if not scene_fragments:
+        return "in a realistic ecommerce-ready background scene"
+    return f"in the following background scene: {scene_fragments[0]}"
+
+
+def _build_pose_variation_prompt(
+    *,
+    identity_lock: str,
+    fragments: dict[str, str],
+    quality_template: str,
+) -> str:
+    style_parts = [
+        fragments.get("camera_fragment", "").strip(),
+        fragments.get("style_fragment", "").strip(),
+        quality_template.strip(),
+    ]
+    style_suffix = ", ".join(part for part in style_parts if part)
+    return (
+        "Character variation image generation. Keep the same core subject identity from the reference image. "
+        f"{identity_lock}. "
+        "You may change pose, gesture, styling, or clothing while preserving face, species, palette, silhouette, and brand-defining details. "
+        f"Create a new expressive variant inspired by this direction: {fragments.get('action_fragment') or fragments.get('scene_fragment') or 'friendly commercial character pose'}. "
+        f"{style_suffix}"
+    ).strip()
 
 
 def build_provider_payload(
@@ -138,6 +167,8 @@ def build_provider_payload(
     generation_task: GenerationTask,
     prompt_profile: PromptProfile | None = None,
     batch_config: BatchPromptConfig | None = None,
+    intent: str = "SCENE_EDIT",
+    intent_reason: str | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """
     组装发往模型网关的标准化载荷，并同时返回一份可落库审计的快照。
@@ -186,23 +217,33 @@ def build_provider_payload(
         )
     )
 
-    final_prompt = (
-        positive_template
-        .replace("{{identity_lock}}", identity_lock)
-        .replace("{{variant_directive}}", variant_directive)
-    )
-    final_prompt = ", ".join(
-        fragment
-        for fragment in [
-            final_prompt,
-            fragments["camera_fragment"],
-            fragments["style_fragment"],
-            quality_template,
-        ]
-        if fragment
-    )
+    normalized_intent = str(intent or "SCENE_EDIT").strip().upper()
+    if normalized_intent == "POSE_VARIATION":
+        final_prompt = _build_pose_variation_prompt(
+            identity_lock=identity_lock,
+            fragments=fragments,
+            quality_template=quality_template,
+        )
+    else:
+        final_prompt = (
+            positive_template
+            .replace("{{identity_lock}}", identity_lock)
+            .replace("{{variant_directive}}", variant_directive)
+        )
+        final_prompt = ", ".join(
+            fragment
+            for fragment in [
+                final_prompt,
+                fragments["camera_fragment"],
+                fragments["style_fragment"],
+                quality_template,
+            ]
+            if fragment
+        )
 
     prompt_snapshot = {
+        "intent": normalized_intent,
+        "intent_reason": intent_reason,
         "identity_lock": identity_lock,
         "positive_template": positive_template,
         "negative_template": negative_template,
@@ -213,20 +254,28 @@ def build_provider_payload(
     }
 
     provider_payload = {
-        "model": "image-2",
         "prompt": final_prompt,
-        "negative_prompt": negative_template,
-        "reference_image_path": source_task.source_path,
+        "size": "1024x1024",
+        "source_image_name": source_task.source_name or f"source.{source_task.source_ext or 'png'}",
+        "source_image_path": source_task.source_path,
+        "openai_model": settings.openai_image_model,
+        "aliyun_model": settings.aliyun_wanx_model,
+        "intent": normalized_intent,
+    }
+
+    if negative_template:
+        provider_payload["prompt"] = (
+            f"{provider_payload['prompt']}\n\nNegative prompt: {negative_template}"
+        )
+
+    prompt_snapshot["provider_context"] = {
         "batch_code": source_task.batch.batch_code if source_task.batch else None,
         "source_task_id": source_task.id,
         "generation_task_id": generation_task.id,
-        "size": "1024x1024",
-        "metadata": {
-            "source_hash": source_task.source_hash,
-            "variant_index": generation_task.variant_index,
-            "variant_axis": axis,
-            "random_seed": random.randint(1000, 999999),
-        },
+        "source_hash": source_task.source_hash,
+        "variant_index": generation_task.variant_index,
+        "variant_axis": axis,
+        "random_seed": random.randint(1000, 999999),
     }
 
     return provider_payload, prompt_snapshot
