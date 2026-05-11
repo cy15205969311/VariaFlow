@@ -14,7 +14,6 @@ from app.core.prompt_lexicon import (
     QUALITY_TERMS,
     RENDER_TERMS,
     SCENE_RECIPES,
-    SPATIAL_GROUNDING_PROMPTS,
 )
 from app.services.prompt_builder import build_provider_payload
 
@@ -105,17 +104,35 @@ def test_build_provider_payload_injects_grounding_prompt_for_scene_edit() -> Non
         intent_reason="standard_product",
         sku_category="bottle_standing",
         suggested_scene="natural_skincare_luxury",
+        suggested_scene_recipe="natural_skincare_luxury",
+        dynamic_spatial_anchor="Standing upright on a solid stone surface with crisp contact shadow directly beneath the base.",
+        dynamic_lighting_needs="Use bright reflective skincare lighting with clean highlights and controlled glass reflections.",
+        primary_sku_description="glass skincare bottle",
+        secondary_props="folded towel, glass dropper",
     )
 
     assert payload["provider_hint"] == "openai_image_edit"
     assert payload["sku_category"] == "bottle_standing"
     assert payload["suggested_scene"] == "natural_skincare_luxury"
+    assert payload["suggested_scene_recipe"] == "natural_skincare_luxury"
+    assert payload["dynamic_spatial_anchor"] == "Standing upright on a solid stone surface with crisp contact shadow directly beneath the base."
+    assert payload["dynamic_lighting_needs"] == "Use bright reflective skincare lighting with clean highlights and controlled glass reflections."
+    assert payload["primary_sku_description"] == "glass skincare bottle"
+    assert payload["secondary_props"] == "folded towel, glass dropper"
     assert snapshot["sku_category"] == "bottle_standing"
     assert snapshot["suggested_scene"] == "natural_skincare_luxury"
+    assert snapshot["suggested_scene_recipe"] == "natural_skincare_luxury"
+    assert snapshot["dynamic_spatial_anchor"] == "Standing upright on a solid stone surface with crisp contact shadow directly beneath the base."
+    assert snapshot["dynamic_lighting_needs"] == "Use bright reflective skincare lighting with clean highlights and controlled glass reflections."
+    assert snapshot["primary_sku_description"] == "glass skincare bottle"
+    assert snapshot["secondary_props"] == "folded towel, glass dropper"
     assert "CRITICAL GROUNDING:" in payload["prompt"]
+    assert "MATERIAL & LIGHTING SYNC:" in payload["prompt"]
     assert "VIRAL SCENE RECIPE:" in payload["prompt"]
     assert "ENVIRONMENT & BACKGROUND:" in payload["prompt"]
-    assert SPATIAL_GROUNDING_PROMPTS["bottle_standing"] in payload["prompt"]
+    assert "CRITICAL IDENTITY LOCK:" in payload["prompt"]
+    assert "Standing upright on a solid stone surface with crisp contact shadow directly beneath the base." in payload["prompt"]
+    assert "Use bright reflective skincare lighting with clean highlights and controlled glass reflections." in payload["prompt"]
     assert SCENE_RECIPES["natural_skincare_luxury"] in payload["prompt"]
     assert payload["suggested_scene_prompt"].startswith(SCENE_RECIPES["natural_skincare_luxury"])
     assert NEGATIVE_SPACE_COMPOSITION_RULE in payload["prompt"]
@@ -144,11 +161,17 @@ def test_build_provider_payload_supports_expanded_sku_grounding_dictionary() -> 
         intent="SCENE_EDIT",
         sku_category="beauty_palette_open",
         suggested_scene="soft_girly_lifestyle",
+        suggested_scene_recipe="soft_girly_lifestyle",
+        dynamic_spatial_anchor="",
+        dynamic_lighting_needs="",
+        primary_sku_description="open pastel eyeshadow palette",
+        secondary_props="makeup brush, mirror",
     )
 
     assert payload["sku_category"] == "beauty_palette_open"
     assert snapshot["sku_category"] == "beauty_palette_open"
-    assert SPATIAL_GROUNDING_PROMPTS["beauty_palette_open"] in payload["prompt"]
+    assert "Placed naturally in a believable real-world position with clear surface contact and realistic grounding." in payload["prompt"]
+    assert "Use realistic commercial product lighting that preserves material texture, natural shadow structure, and clean subject separation." in payload["prompt"]
     assert payload["provider_hint"] == "openai_image_edit"
 
 
@@ -208,6 +231,9 @@ def test_build_provider_payload_switches_prompt_for_pose_variation() -> None:
         intent="POSE_VARIATION",
         intent_reason="cartoon_character",
         sku_category="3d_toy",
+        suggested_scene_recipe="soft_girly_lifestyle",
+        primary_sku_description="blind-box monkey mascot figure",
+        secondary_props="yellow jacket, gingerbread prop",
         subject_features="3D chibi cartoon monkey, large brown eyes, fluffy light brown fur",
         style_features="polished 3D blind-box render, glossy toy material",
         background_features="soft warm indoor studio gradient background",
@@ -216,6 +242,9 @@ def test_build_provider_payload_switches_prompt_for_pose_variation() -> None:
     assert payload["intent"] == "POSE_VARIATION"
     assert snapshot["intent"] == "POSE_VARIATION"
     assert snapshot["sku_category"] == "3d_toy"
+    assert snapshot["suggested_scene_recipe"] == "soft_girly_lifestyle"
+    assert snapshot["primary_sku_description"] == "blind-box monkey mascot figure"
+    assert snapshot["secondary_props"] == "yellow jacket, gingerbread prop"
     assert snapshot["subject_features"] == "3D chibi cartoon monkey, large brown eyes, fluffy light brown fur"
     assert snapshot["style_features"] == "polished 3D blind-box render, glossy toy material"
     assert snapshot["background_features"] == "soft warm indoor studio gradient background"
@@ -225,8 +254,12 @@ def test_build_provider_payload_switches_prompt_for_pose_variation() -> None:
     assert payload["provider_hint"] == "openai_image_generation"
     assert payload["sku_category"] == "3d_toy"
     assert payload["suggested_scene"] == ""
+    assert payload["suggested_scene_recipe"] == "soft_girly_lifestyle"
     assert snapshot["suggested_scene"] == ""
     assert payload["suggested_scene_prompt"] == ""
+    assert "CRITICAL IDENTITY LOCK: You MUST preserve the exact design, texture, and color of the primary subject: [blind-box monkey mascot figure]." in payload["prompt"]
+    assert "The secondary accessories like [yellow jacket, gingerbread prop] are OPTIONAL and can be removed or altered naturally." in payload["prompt"]
+    assert f"SCENE EMOTION RECIPE: [{SCENE_RECIPES['soft_girly_lifestyle']}]." in payload["prompt"]
     assert "Create a masterpiece, ultra-high definition image of the exact same IP character in a new pose." in payload["prompt"]
     assert "Must strictly adhere to this exact artistic style and lighting" in payload["prompt"]
     assert "The environment and background must be" in payload["prompt"]
@@ -264,6 +297,9 @@ def test_build_provider_payload_routes_real_human_pose_variation_to_openai_edit(
         intent="POSE_VARIATION",
         intent_reason="real_model",
         sku_category="real_human_model",
+        suggested_scene_recipe="french_street_vibe",
+        primary_sku_description="structured cream trench coat",
+        secondary_props="oversized sunglasses, leather shoulder bag",
         subject_features="young female fashion model, oval face, shoulder-length dark hair, slim body proportions",
         style_features="premium editorial fashion photography, natural human skin tones, elegant softbox lighting",
         background_features="chic outdoor Parisian cafe atmosphere with soft city blur",
@@ -271,8 +307,86 @@ def test_build_provider_payload_routes_real_human_pose_variation_to_openai_edit(
 
     assert payload["provider_hint"] == "openai_image_edit"
     assert snapshot["sku_category"] == "real_human_model"
+    assert snapshot["primary_sku_description"] == "structured cream trench coat"
+    assert snapshot["secondary_props"] == "oversized sunglasses, leather shoulder bag"
     assert "Use the provided real human model image as the direct visual reference." in payload["prompt"]
     assert "Do not replace the person with a different model or mannequin." in payload["prompt"]
+    assert f"SCENE EMOTION RECIPE: [{SCENE_RECIPES['french_street_vibe']}]." in payload["prompt"]
+
+
+def test_build_provider_payload_for_food_scene_forces_warm_recipe() -> None:
+    batch = SimpleNamespace(batch_code="batch-004")
+    source_task = SimpleNamespace(
+        source_name="S0004_src_mock.png",
+        source_ext="png",
+        source_path="E:/tmp/S0004_src_mock.png",
+        identity_profile_json={"identity_lock": "Keep the same subject identity."},
+        batch=batch,
+        id=4,
+        source_hash="food123",
+    )
+    generation_task = SimpleNamespace(
+        id=104,
+        variant_index=1,
+        variant_axis=SimpleNamespace(value="scene"),
+    )
+
+    payload, snapshot = build_provider_payload(
+        source_task,
+        generation_task,
+        intent="SCENE_EDIT",
+        sku_category="food_packaged_standing",
+        suggested_scene="clean_fit_minimal",
+        suggested_scene_recipe="clean_fit_minimal",
+        dynamic_spatial_anchor="Standing upright on a bakery counter with believable grounded package weight and crisp contact shadow.",
+        dynamic_lighting_needs="Use warm appetizing morning backlight with soft highlights that make the packaging and food feel fresh.",
+        primary_sku_description="fresh bakery gift box",
+        secondary_props="linen napkin, wooden tray",
+    )
+
+    assert payload["suggested_scene"] == "gourmet_morning_bakery"
+    assert payload["suggested_scene_recipe"] == "gourmet_morning_bakery"
+    assert snapshot["suggested_scene"] == "gourmet_morning_bakery"
+    assert snapshot["suggested_scene_recipe"] == "gourmet_morning_bakery"
+    assert payload["suggested_scene_prompt"].startswith(SCENE_RECIPES["gourmet_morning_bakery"])
+    assert "gourmet_morning_bakery" in payload["prompt"]
+    assert "Use warm appetizing morning backlight with soft highlights that make the packaging and food feel fresh." in payload["prompt"]
+
+
+def test_build_provider_payload_scene_edit_uses_dynamic_fallback_when_prompt_is_too_short() -> None:
+    batch = SimpleNamespace(batch_code="batch-005")
+    source_task = SimpleNamespace(
+        source_name="S0005_src_mock.png",
+        source_ext="png",
+        source_path="E:/tmp/S0005_src_mock.png",
+        identity_profile_json={"identity_lock": "Keep the same subject identity."},
+        batch=batch,
+        id=5,
+        source_hash="fallback-dyn-001",
+    )
+    generation_task = SimpleNamespace(
+        id=105,
+        variant_index=1,
+        variant_axis=SimpleNamespace(value="scene"),
+    )
+
+    payload, snapshot = build_provider_payload(
+        source_task,
+        generation_task,
+        intent="SCENE_EDIT",
+        sku_category="shoes_resting",
+        suggested_scene="clean_fit_minimal",
+        suggested_scene_recipe="clean_fit_minimal",
+        dynamic_spatial_anchor="upright",
+        dynamic_lighting_needs="soft light",
+        primary_sku_description="black ankle boots",
+        secondary_props="none",
+    )
+
+    assert snapshot["dynamic_spatial_anchor"] == "upright"
+    assert snapshot["dynamic_lighting_needs"] == "soft light"
+    assert "Placed firmly on the ground at realistic 1:1 scale with strong contact shadows and no oversized environment distortion." in payload["prompt"]
+    assert "Use clean commercial side lighting that preserves material texture, scale realism, and strong grounded shadow shape." in payload["prompt"]
 
 
 def test_default_aliyun_imageedit_strength_is_high_enough_for_pose_variation() -> None:

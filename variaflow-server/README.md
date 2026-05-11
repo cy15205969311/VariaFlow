@@ -5,20 +5,26 @@
 - ZIP 批次上传与解包
 - 源图标准化与任务切片
 - 多模态视觉意图识别
-- 双轨 Prompt 组装与 AI Provider 调度
+- Prompt 组装与 AI Provider 调度
 - 图像质检、状态流转与结果落盘
 - 前端任务列表所需的识别信息透传
 
 ## 当前架构概览
 
-### 智能路由
+### 1. 智能双轨路由
 
-视觉模型先对源图进行分类，输出：
+视觉模型会先对源图做结构化分析，并输出：
 
 - `intent`
 - `reason`
+- `subject_type`
 - `sku_category`
 - `suggested_scene`
+- `suggested_scene_recipe`
+- `dynamic_spatial_anchor`
+- `dynamic_lighting_needs`
+- `primary_sku_description`
+- `secondary_props`
 - `subject_features`
 - `style_features`
 - `background_features`
@@ -29,7 +35,19 @@
 - `POSE_VARIATION` -> `openai_image_generation`
 - `POSE_VARIATION + real_human_model` -> 强制改走 `openai_image_edit`
 
-### 视觉模型解耦
+### 2. 动态物理约束生成
+
+当前后端已从“纯静态类目映射”演进到“动态主路径 + 轻量兜底”：
+
+- 对 `SCENE_EDIT`，优先使用视觉模型生成的：
+  - `dynamic_spatial_anchor`
+  - `dynamic_lighting_needs`
+- 这些字段会直接拼进最终发给 OpenAI 的 Prompt
+- 若动态字段过短、缺失或不可执行，则使用少量后端 fallback 规则兜底
+
+这让系统不需要继续维护臃肿的全量品类静态 Prompt 字典，同时又保留足够稳定性。
+
+### 3. 视觉模型解耦
 
 当前支持通过 `.env` 在以下视觉模型之间切换：
 
@@ -37,15 +55,15 @@
 - `deepseek-v4-flash`
 - `deepseek-v4-pro`
 
-### 电商商拍增强
+### 4. 电商商拍增强
 
 当前已经落地以下后端能力：
 
-- 扩展版 SKU 物理分类体系
 - 场景配方库与商业摄影增强词库
+- 动态空间落位与动态打光注入
 - 智能画布补白与重力锚点
 - 本地静默抠图
-- 真人模特背景移除豁免
+- `human_model` 与真人模特豁免链路
 - 真人模特动作变体专线
 
 ## 关键模块
@@ -59,37 +77,11 @@
 职责：
 
 - 调用视觉模型识别 `SCENE_EDIT` / `POSE_VARIATION`
-- 输出电商 SKU 物理分类
-- 为 `SCENE_EDIT` 推荐 `suggested_scene`
+- 输出 `subject_type`
+- 为 `SCENE_EDIT` 生成动态物理约束与动态打光需求
+- 为 `SCENE_EDIT` 推荐 `suggested_scene_recipe`
 - 为 `POSE_VARIATION` 提取主体、画风、背景三类特征
-
-当前支持的主要 `sku_category` 包括：
-
-- `apparel_flat`
-- `apparel_hanging`
-- `apparel_invisible_mannequin`
-- `shoes_resting`
-- `bag_standing`
-- `accessories_flat`
-- `beauty_bottle_standing`
-- `beauty_tube_flat`
-- `beauty_palette_open`
-- `jewelry_macro_display`
-- `watch_stand_display`
-- `electronic_flat`
-- `appliance_standing`
-- `furniture_room_setup`
-- `home_decor_resting`
-- `food_packaged_standing`
-- `food_plated`
-- `toy_standing`
-- `plush_sitting`
-- `virtual_ip_character`
-- `real_human_model`
-- `bottle_standing`
-- `box_standing`
-- `3d_toy`
-- `other_flat`
+- 输出主售卖主体与次级配饰拆分结果
 
 ### 2. Prompt 词库与组装
 
@@ -100,28 +92,30 @@
 
 职责：
 
-- 为不同 SKU 注入物理落地指令
-- 根据场景配方生成电商氛围背景
+- 注入商业场景 recipe
 - 为 `POSE_VARIATION` 注入主体、风格、背景三维特征
-- 对 3D IP 与真人模特分别使用不同的变体 Prompt
+- 对真人模特和 3D IP 使用不同 Prompt 分支
+- 对 `SCENE_EDIT` 优先拼接动态 grounding / lighting
+- 当动态字段不可靠时使用 fallback
 
-主要词库：
+当前保留的词库重点：
 
-- `SPATIAL_GROUNDING_PROMPTS`
-- `ENVIRONMENT_TEMPLATES`
 - `SCENE_RECIPES`
 - `SCENE_RECIPE_FALLBACKS`
+- `ENVIRONMENT_TEMPLATES`
 - `QUALITY_TERMS`
 - `LIGHTING_TERMS`
 - `CAMERA_TERMS`
 - `RENDER_TERMS`
 - `NEGATIVE_SPACE_COMPOSITION_RULE`
 
-新增高转化场景配方：
+新增与强化的场景配方包括：
 
 - `french_street_vibe`
 - `luxury_water_surface`
 - `nature_forest_outdoor`
+- `gourmet_morning_bakery`
+- `luxury_dark_chocolate`
 
 ### 3. 图片预处理
 
@@ -138,8 +132,8 @@
 
 当前能力：
 
-- `real_human_model` 跳过 `rembg`
-- 支持 `top_center`、`bottom_center`、`bottom_right`、`center_right` 等锚点
+- `subject_type == human_model` 时跳过 `rembg`
+- `real_human_model` 仍然保留专门豁免
 - 输出预处理元信息到 `prompt_snapshot_json`
 
 ### 4. 执行器
@@ -153,15 +147,19 @@
 - 调用视觉路由
 - 组装 Provider payload
 - 决定最终 Provider hint
-- 在 `SCENE_EDIT` 场景下调用智能预处理
+- 在 `SCENE_EDIT` 下执行智能预处理
 - 在真人变体场景下保留原图直送 OpenAI edits
 - 记录 attempt、QC 和最终状态
 
 当前新增逻辑：
 
-- `[Router] <intent> detected, routing to <provider> pipeline` 日志
-- `POSE_VARIATION + real_human_model` 强制路由 `openai_image_edit`
-- `SCENE_EDIT` 预处理结果持久化到任务快照
+- 将 `subject_type`
+- `dynamic_spatial_anchor`
+- `dynamic_lighting_needs`
+- `primary_sku_description`
+- `secondary_props`
+
+一起持久化进任务快照，并透传到接口层。
 
 ## 本地启动
 
@@ -278,29 +276,27 @@ data/
 推荐快速回归：
 
 ```powershell
-pytest -q tests/test_image_processor.py tests/test_openai_config_and_prompt.py tests/test_vision_router.py tests/test_ai_provider_routing.py
+pytest -q tests/test_vision_router.py tests/test_openai_config_and_prompt.py tests/test_image_processor.py tests/test_ai_provider_routing.py
 ```
 
 说明：
 
-- 上述回归覆盖视觉路由、Prompt 控制、OpenAI 路由与图片预处理
+- 这组回归已覆盖：
+  - 动态视觉字段解析
+  - 动态 grounding / lighting Prompt 注入
+  - 食品暖调 recipe 强制保护
+  - `human_model` 抠图豁免
+  - OpenAI 路由逻辑
 - `tests/test_executor.py` 需要本地测试库 `variaflow_test`
 - 若测试库不存在，完整测试会因数据库连接失败而中断
 
-## 最近一轮真实验证
+## 最近一轮真实演进方向
 
-最近已基于仓库根目录 `image.zip` 做过批量回归，确认：
+当前系统已经完成从“静态 SKU 规则映射”向“动态物理约束生成”的过渡：
 
-- 普通商品 `SCENE_EDIT` 可触发智能抠图、补白与场景配方
-- 真人模特 `POSE_VARIATION` 已成功切换到 `openai_image_edit`
-- 任务快照会记录：
-  - `provider_hint`
-  - `sku_category`
-  - `suggested_scene`
-  - `subject_features`
-  - `style_features`
-  - `background_features`
-  - 预处理锚点与画布元数据
+- 视觉模型开始直接生成可执行的物理与光影 Prompt
+- 后端只保留少量 fallback 守门逻辑
+- 既缓解了规则爆炸，也避免了现阶段完全放权带来的失控
 
 ## 相关文档
 

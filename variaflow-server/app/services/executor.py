@@ -155,11 +155,16 @@ async def _prepare_execution_context(
         batch_config,
         intent=vision_decision.intent,
         intent_reason=vision_decision.reason,
+        primary_sku_description=vision_decision.primary_sku_description,
+        secondary_props=vision_decision.secondary_props,
         subject_features=vision_decision.subject_features,
         style_features=vision_decision.style_features,
         background_features=vision_decision.background_features,
         sku_category=vision_decision.sku_category,
         suggested_scene=vision_decision.suggested_scene,
+        suggested_scene_recipe=vision_decision.suggested_scene_recipe,
+        dynamic_spatial_anchor=vision_decision.dynamic_spatial_anchor,
+        dynamic_lighting_needs=vision_decision.dynamic_lighting_needs,
     )
     payload["vision_route_intent"] = vision_decision.intent
     payload["vision_route_reason"] = vision_decision.reason
@@ -167,13 +172,25 @@ async def _prepare_execution_context(
         vision_decision.intent,
         vision_decision.sku_category,
     )
+    payload["subject_type"] = vision_decision.subject_type
     payload["sku_category"] = vision_decision.sku_category
     payload["suggested_scene"] = vision_decision.suggested_scene
+    payload["suggested_scene_recipe"] = vision_decision.suggested_scene_recipe
+    payload["dynamic_spatial_anchor"] = vision_decision.dynamic_spatial_anchor
+    payload["dynamic_lighting_needs"] = vision_decision.dynamic_lighting_needs
+    payload["primary_sku_description"] = vision_decision.primary_sku_description
+    payload["secondary_props"] = vision_decision.secondary_props
     payload["subject_features"] = vision_decision.subject_features
     payload["style_features"] = vision_decision.style_features
     payload["background_features"] = vision_decision.background_features
     payload["vision_route_used_fallback"] = vision_decision.used_fallback
     prompt_snapshot["suggested_scene"] = vision_decision.suggested_scene
+    prompt_snapshot["suggested_scene_recipe"] = vision_decision.suggested_scene_recipe
+    prompt_snapshot["subject_type"] = vision_decision.subject_type
+    prompt_snapshot["dynamic_spatial_anchor"] = vision_decision.dynamic_spatial_anchor
+    prompt_snapshot["dynamic_lighting_needs"] = vision_decision.dynamic_lighting_needs
+    prompt_snapshot["primary_sku_description"] = vision_decision.primary_sku_description
+    prompt_snapshot["secondary_props"] = vision_decision.secondary_props
     prompt_snapshot["subject_features"] = vision_decision.subject_features
     prompt_snapshot["style_features"] = vision_decision.style_features
     prompt_snapshot["background_features"] = vision_decision.background_features
@@ -181,8 +198,14 @@ async def _prepare_execution_context(
     prompt_snapshot["vision_router"] = {
         "intent": vision_decision.intent,
         "reason": vision_decision.reason,
+        "subject_type": vision_decision.subject_type,
         "sku_category": vision_decision.sku_category,
         "suggested_scene": vision_decision.suggested_scene,
+        "suggested_scene_recipe": vision_decision.suggested_scene_recipe,
+        "dynamic_spatial_anchor": vision_decision.dynamic_spatial_anchor,
+        "dynamic_lighting_needs": vision_decision.dynamic_lighting_needs,
+        "primary_sku_description": vision_decision.primary_sku_description,
+        "secondary_props": vision_decision.secondary_props,
         "subject_features": vision_decision.subject_features,
         "style_features": vision_decision.style_features,
         "background_features": vision_decision.background_features,
@@ -464,6 +487,7 @@ async def process_generation_task(
                 source_image_path,
                 context.batch_output_root.parent / "preprocessed",
                 sku_category=context.payload.get("sku_category"),
+                subject_type=context.payload.get("subject_type"),
                 suggested_scene=context.payload.get("suggested_scene"),
                 target_size=context.payload.get("size"),
             )

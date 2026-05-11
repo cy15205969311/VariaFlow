@@ -13,7 +13,6 @@ from app.core.prompt_lexicon import (
     RENDER_TERMS,
     SCENE_RECIPE_FALLBACKS,
     SCENE_RECIPES,
-    SPATIAL_GROUNDING_PROMPTS,
 )
 from app.models.tasks import BatchPromptConfig, GenerationTask, PromptProfile, PromptVariableOption, SourceTask
 
@@ -90,6 +89,76 @@ def _normalize_scene_text(raw: str | None) -> str:
 def _normalize_scene_recipe_key(raw: str | None) -> str:
     value = _normalize_scene_text(raw).lower()
     return value if value in SCENE_RECIPES else ""
+
+
+def _normalize_accessory_text(raw: str | None) -> str:
+    return _normalize_scene_text(raw)
+
+
+def _is_food_category(sku_category: str | None) -> bool:
+    return "food" in str(sku_category or "").strip().lower()
+
+
+def _resolve_food_scene_recipe_key(candidate: str | None) -> str:
+    normalized = _normalize_scene_recipe_key(candidate)
+    if normalized in {"gourmet_morning_bakery", "luxury_dark_chocolate"}:
+        return normalized
+    return "gourmet_morning_bakery"
+
+
+def _has_executable_dynamic_prompt(raw: str | None) -> bool:
+    normalized = _normalize_scene_text(raw)
+    if len(normalized) < 24:
+        return False
+    keywords = (
+        "shadow",
+        "surface",
+        "stand",
+        "standing",
+        "rest",
+        "resting",
+        "lay",
+        "lying",
+        "hang",
+        "hanging",
+        "light",
+        "lighting",
+        "reflection",
+        "backlight",
+        "top-down",
+        "upright",
+        "grounded",
+    )
+    lowered = normalized.lower()
+    return any(keyword in lowered for keyword in keywords)
+
+
+def _fallback_spatial_anchor_for_sku(sku_category: str) -> str:
+    fallback_map = {
+        "real_human_model": "Presented by a real human model with natural body grounding, full-body continuity, and realistic contact with the environment.",
+        "apparel_hanging": "Hanging naturally with realistic vertical fabric drape and clear top support alignment.",
+        "food_packaged_standing": "Standing upright on a stable surface with crisp grounded contact shadows and appetizing packaging presentation.",
+        "food_plated": "Laying naturally on a plate or serving surface with believable food placement and grounded contact.",
+        "shoes_resting": "Placed firmly on the ground at realistic 1:1 scale with strong contact shadows and no oversized environment distortion.",
+    }
+    return fallback_map.get(
+        sku_category,
+        "Placed naturally in a believable real-world position with clear surface contact and realistic grounding.",
+    )
+
+
+def _fallback_lighting_needs_for_sku(sku_category: str) -> str:
+    fallback_map = {
+        "real_human_model": "Use premium editorial fashion lighting with natural skin tones, realistic body volume, and balanced garment detail.",
+        "food_packaged_standing": "Use warm appetizing commercial lighting with gentle highlights, fresh texture emphasis, and inviting shadow contrast.",
+        "food_plated": "Use warm appetizing food photography lighting that enhances texture, moisture, and freshness without cold color casts.",
+        "beauty_bottle_standing": "Use precise reflective beauty lighting with elegant highlights and controlled transparency or gloss treatment.",
+        "shoes_resting": "Use clean commercial side lighting that preserves material texture, scale realism, and strong grounded shadow shape.",
+    }
+    return fallback_map.get(
+        sku_category,
+        "Use realistic commercial product lighting that preserves material texture, natural shadow structure, and clean subject separation.",
+    )
 
 
 def _choose_slot_value(values: list[str], slot_seed: int) -> str:
@@ -184,6 +253,10 @@ def _build_pose_variation_prompt(
     identity_lock: str,
     fragments: dict[str, str],
     quality_template: str,
+    sku_category: str,
+    primary_sku_description: str | None = None,
+    secondary_props: str | None = None,
+    suggested_scene_recipe: str | None = None,
     subject_features: str | None = None,
     style_features: str | None = None,
     background_features: str | None = None,
@@ -211,6 +284,19 @@ def _build_pose_variation_prompt(
     subject_clause = subject_features.strip() if subject_features and subject_features.strip() else (
         "the exact same character identity, species, facial features, body proportions, and signature visual traits"
     )
+    primary_clause = primary_sku_description.strip() if primary_sku_description and primary_sku_description.strip() else (
+        "the core character subject"
+    )
+    secondary_clause = secondary_props.strip() if secondary_props and secondary_props.strip() else "secondary accessories"
+    resolved_scene_recipe_key = (
+        _resolve_food_scene_recipe_key(suggested_scene_recipe)
+        if _is_food_category(sku_category)
+        else _normalize_scene_recipe_key(suggested_scene_recipe)
+    )
+    scene_recipe_prompt = SCENE_RECIPES.get(
+        resolved_scene_recipe_key,
+        background_clause,
+    )
     camera_clause = fragments.get("camera_fragment", "").strip()
     quality_clause = quality_template.strip()
     style_tail = ", ".join(
@@ -223,7 +309,10 @@ def _build_pose_variation_prompt(
         "Create a masterpiece, ultra-high definition image of the exact same IP character in a new pose. "
         f"Must strictly adhere to this exact artistic style and lighting: [{style_clause}]. "
         f"The environment and background must be: [{background_clause}]. "
+        f"SCENE EMOTION RECIPE: [{scene_recipe_prompt}]. "
         f"The main character must exactly match this physical description and identity, without changing species, face, body proportions, or signature traits: [{subject_clause}]. "
+        f"CRITICAL IDENTITY LOCK: You MUST preserve the exact design, texture, and color of the primary subject: [{primary_clause}]. "
+        f"The secondary accessories like [{secondary_clause}] are OPTIONAL and can be removed or altered naturally. "
         f"{identity_lock}. "
         "Preserve the same premium 3D blind-box quality, facial appeal, material richness, and overall charm. "
         "Do not create a different character. Do not drift into a generic monkey. "
@@ -244,11 +333,25 @@ def _build_scene_edit_prompt(
     sku_category: str,
     scene_recipe_key: str,
     scene_environment: str,
+    dynamic_spatial_anchor: str | None = None,
+    dynamic_lighting_needs: str | None = None,
+    primary_sku_description: str | None = None,
+    secondary_props: str | None = None,
 ) -> str:
-    grounding_prompt = SPATIAL_GROUNDING_PROMPTS.get(
-        sku_category,
-        SPATIAL_GROUNDING_PROMPTS["other_flat"],
+    grounding_prompt = (
+        _normalize_scene_text(dynamic_spatial_anchor)
+        if _has_executable_dynamic_prompt(dynamic_spatial_anchor)
+        else _fallback_spatial_anchor_for_sku(sku_category)
     )
+    lighting_prompt = (
+        _normalize_scene_text(dynamic_lighting_needs)
+        if _has_executable_dynamic_prompt(dynamic_lighting_needs)
+        else _fallback_lighting_needs_for_sku(sku_category)
+    )
+    primary_clause = primary_sku_description.strip() if primary_sku_description and primary_sku_description.strip() else (
+        "the core sellable product"
+    )
+    secondary_clause = secondary_props.strip() if secondary_props and secondary_props.strip() else "secondary styling props"
     base_prompt = (
         positive_template
         .replace("{{identity_lock}}", identity_lock)
@@ -258,8 +361,10 @@ def _build_scene_edit_prompt(
         fragment
         for fragment in [
             f"CRITICAL GROUNDING: {grounding_prompt}.",
+            f"MATERIAL & LIGHTING SYNC: {lighting_prompt}.",
             f"VIRAL SCENE RECIPE: {scene_recipe_key}.",
             f"ENVIRONMENT & BACKGROUND: {scene_environment}.",
+            f"CRITICAL IDENTITY LOCK: You MUST preserve the exact design, texture, and color of the primary subject: [{primary_clause}]. The secondary accessories like [{secondary_clause}] are OPTIONAL and can be removed or altered naturally.",
             "Ensure realistic drop shadows, believable surface contact, and seamless commercial integration.",
             NEGATIVE_SPACE_COMPOSITION_RULE,
             base_prompt,
@@ -276,6 +381,9 @@ def _build_real_human_pose_edit_prompt(
     identity_lock: str,
     fragments: dict[str, str],
     quality_template: str,
+    primary_sku_description: str | None = None,
+    secondary_props: str | None = None,
+    suggested_scene_recipe: str | None = None,
     subject_features: str | None = None,
     style_features: str | None = None,
     background_features: str | None = None,
@@ -289,6 +397,17 @@ def _build_real_human_pose_edit_prompt(
     subject_clause = subject_features.strip() if subject_features and subject_features.strip() else (
         "the exact same real human model identity, facial features, body proportions, and styling essence"
     )
+    primary_clause = primary_sku_description.strip() if primary_sku_description and primary_sku_description.strip() else (
+        "the dominant garment being sold"
+    )
+    secondary_clause = secondary_props.strip() if secondary_props and secondary_props.strip() else (
+        "non-core accessories"
+    )
+    resolved_scene_recipe_key = _normalize_scene_recipe_key(suggested_scene_recipe)
+    scene_recipe_prompt = SCENE_RECIPES.get(
+        resolved_scene_recipe_key,
+        background_clause,
+    )
     camera_clause = fragments.get("camera_fragment", "").strip()
     style_tail = ", ".join(
         part
@@ -300,6 +419,9 @@ def _build_real_human_pose_edit_prompt(
         f"Preserve the exact same person identity and recognizability: [{subject_clause}]. "
         f"Maintain this premium photography style and lighting language: [{style_clause}]. "
         f"Keep the scene atmosphere aligned with: [{background_clause}]. "
+        f"SCENE EMOTION RECIPE: [{scene_recipe_prompt}]. "
+        f"CRITICAL IDENTITY LOCK: You MUST preserve the exact design, texture, and color of the primary subject: [{primary_clause}]. "
+        f"The secondary accessories like [{secondary_clause}] are OPTIONAL and can be removed or altered naturally. "
         f"{identity_lock}. "
         "Generate a tasteful pose or styling variation of the same real person while preserving facial identity, body continuity, garment integrity, and realistic grounding. "
         "Do not replace the person with a different model or mannequin. Do not crop off the head, hands, or feet. "
@@ -314,7 +436,11 @@ def _resolve_scene_environment(
     source_task: SourceTask,
     generation_task: GenerationTask,
 ) -> tuple[str, str]:
-    normalized_recipe_key = _normalize_scene_recipe_key(suggested_scene)
+    normalized_recipe_key = (
+        _resolve_food_scene_recipe_key(suggested_scene)
+        if _is_food_category(sku_category)
+        else _normalize_scene_recipe_key(suggested_scene)
+    )
     if normalized_recipe_key:
         return normalized_recipe_key, SCENE_RECIPES[normalized_recipe_key]
 
@@ -322,6 +448,10 @@ def _resolve_scene_environment(
         sku_category,
         SCENE_RECIPE_FALLBACKS["other_flat"],
     )
+    if _is_food_category(sku_category):
+        recipe_options = [recipe for recipe in recipe_options if recipe in {"gourmet_morning_bakery", "luxury_dark_chocolate"}]
+        if not recipe_options:
+            recipe_options = ["gourmet_morning_bakery"]
     seed_value = generation_task.variant_index + sum(ord(char) for char in (source_task.source_hash or ""))
     fallback_recipe_key = recipe_options[seed_value % len(recipe_options)]
     return fallback_recipe_key, SCENE_RECIPES[fallback_recipe_key]
@@ -348,11 +478,16 @@ def build_provider_payload(
     batch_config: BatchPromptConfig | None = None,
     intent: str = "SCENE_EDIT",
     intent_reason: str | None = None,
+    primary_sku_description: str | None = None,
+    secondary_props: str | None = None,
     subject_features: str | None = None,
     style_features: str | None = None,
     background_features: str | None = None,
     sku_category: str | None = None,
     suggested_scene: str | None = None,
+    suggested_scene_recipe: str | None = None,
+    dynamic_spatial_anchor: str | None = None,
+    dynamic_lighting_needs: str | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """
     组装发往模型网关的标准化载荷，并同时返回一份可落库审计的快照。
@@ -403,8 +538,11 @@ def build_provider_payload(
 
     normalized_intent = str(intent or "SCENE_EDIT").strip().upper()
     normalized_sku_category = str(sku_category or "other_flat").strip().lower() or "other_flat"
+    normalized_primary_sku_description = _normalize_scene_text(primary_sku_description)
+    normalized_secondary_props = _normalize_accessory_text(secondary_props)
+    normalized_scene_recipe_input = _normalize_scene_recipe_key(suggested_scene_recipe) or _normalize_scene_recipe_key(suggested_scene)
     resolved_scene_recipe_key, resolved_scene_recipe = _resolve_scene_environment(
-        suggested_scene=suggested_scene,
+        suggested_scene=normalized_scene_recipe_input,
         sku_category=normalized_sku_category,
         source_task=source_task,
         generation_task=generation_task,
@@ -423,6 +561,9 @@ def build_provider_payload(
             identity_lock=identity_lock,
             fragments=fragments,
             quality_template=quality_template,
+            primary_sku_description=normalized_primary_sku_description,
+            secondary_props=normalized_secondary_props,
+            suggested_scene_recipe=normalized_scene_recipe_input or resolved_scene_recipe_key,
             subject_features=subject_features,
             style_features=style_features,
             background_features=background_features,
@@ -432,6 +573,10 @@ def build_provider_payload(
             identity_lock=identity_lock,
             fragments=fragments,
             quality_template=quality_template,
+            sku_category=normalized_sku_category,
+            primary_sku_description=normalized_primary_sku_description,
+            secondary_props=normalized_secondary_props,
+            suggested_scene_recipe=normalized_scene_recipe_input or resolved_scene_recipe_key,
             subject_features=subject_features,
             style_features=style_features,
             background_features=background_features,
@@ -446,6 +591,10 @@ def build_provider_payload(
             sku_category=normalized_sku_category,
             scene_recipe_key=resolved_scene_recipe_key,
             scene_environment=resolved_scene_environment,
+            dynamic_spatial_anchor=dynamic_spatial_anchor,
+            dynamic_lighting_needs=dynamic_lighting_needs,
+            primary_sku_description=normalized_primary_sku_description,
+            secondary_props=normalized_secondary_props,
         )
 
     prompt_snapshot = {
@@ -453,7 +602,12 @@ def build_provider_payload(
         "intent_reason": intent_reason,
         "sku_category": normalized_sku_category,
         "suggested_scene": resolved_scene_recipe_key if normalized_intent == "SCENE_EDIT" else "",
+        "suggested_scene_recipe": resolved_scene_recipe_key,
         "suggested_scene_prompt": resolved_scene_environment if normalized_intent == "SCENE_EDIT" else "",
+        "dynamic_spatial_anchor": _normalize_scene_text(dynamic_spatial_anchor) if normalized_intent == "SCENE_EDIT" else "",
+        "dynamic_lighting_needs": _normalize_scene_text(dynamic_lighting_needs) if normalized_intent == "SCENE_EDIT" else "",
+        "primary_sku_description": normalized_primary_sku_description,
+        "secondary_props": normalized_secondary_props,
         "subject_features": subject_features if normalized_intent == "POSE_VARIATION" else "",
         "style_features": style_features if normalized_intent == "POSE_VARIATION" else "",
         "background_features": background_features if normalized_intent == "POSE_VARIATION" else "",
@@ -476,7 +630,12 @@ def build_provider_payload(
         "intent": normalized_intent,
         "sku_category": normalized_sku_category,
         "suggested_scene": resolved_scene_recipe_key if normalized_intent == "SCENE_EDIT" else "",
+        "suggested_scene_recipe": resolved_scene_recipe_key,
         "suggested_scene_prompt": resolved_scene_environment if normalized_intent == "SCENE_EDIT" else "",
+        "dynamic_spatial_anchor": _normalize_scene_text(dynamic_spatial_anchor) if normalized_intent == "SCENE_EDIT" else "",
+        "dynamic_lighting_needs": _normalize_scene_text(dynamic_lighting_needs) if normalized_intent == "SCENE_EDIT" else "",
+        "primary_sku_description": normalized_primary_sku_description,
+        "secondary_props": normalized_secondary_props,
         "subject_features": subject_features if normalized_intent == "POSE_VARIATION" else "",
         "style_features": style_features if normalized_intent == "POSE_VARIATION" else "",
         "background_features": background_features if normalized_intent == "POSE_VARIATION" else "",

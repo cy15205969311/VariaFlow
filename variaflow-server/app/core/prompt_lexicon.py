@@ -34,34 +34,6 @@ RENDER_TERMS = [
     "high-end blind box toy material",
 ]
 
-SPATIAL_GROUNDING_PROMPTS = {
-    "apparel_flat": "professional flat lay photography, laid naturally with realistic fabric folds, top-down view",
-    "apparel_hanging": "hanging naturally with realistic vertical fabric drape, photographed straight-on",
-    "apparel_invisible_mannequin": "worn by an invisible 3D mannequin, standing upright, realistic garment volume and premium fabric drape, clean centered commercial composition",
-    "shoes_resting": "resting naturally on a clean surface, dynamic 45-degree angle, sharp focus on texture, grounded with realistic drop shadows",
-    "bag_standing": "standing upright with subtle internal structure support, premium perspective, realistic base contact shadow, luxury fashion still life presentation",
-    "accessories_flat": "carefully arranged flat lay accessory photography, balanced spacing, crisp detail, grounded with soft directional shadows",
-    "beauty_bottle_standing": "standing upright on a premium display podium, sharp studio reflections, realistic contact shadows directly beneath the base, high-end commercial beauty photography",
-    "beauty_tube_flat": "placed naturally on a clean surface, soft premium reflections, elegant contact shadows, top-down or slight angle beauty still life photography",
-    "beauty_palette_open": "opened and displayed clearly on a premium surface, macro-friendly beauty photography, sharp detail on product texture, refined shadow control",
-    "jewelry_macro_display": "resting elegantly on a premium display surface, macro photography, sparkling reflections, razor-sharp focus on gemstone and metal details",
-    "watch_stand_display": "mounted on a premium watch stand, clear frontal presentation of the dial, controlled reflections, luxury studio lighting, grounded support shadow",
-    "electronic_flat": "placed precisely on a sleek technology surface, clean lines, subtle reflections, grounded with realistic shadow control, premium electronics still life",
-    "appliance_standing": "standing securely on a clean surface or floor, realistic base contact, commercial appliance photography with balanced perspective and grounded shadows",
-    "furniture_room_setup": "positioned naturally in a complete interior room scene, grounded on the floor with realistic scale, perspective, and ambient room shadows",
-    "home_decor_resting": "resting naturally on a lifestyle surface, integrated into a refined interior vignette, realistic soft contact shadows and tasteful composition",
-    "food_packaged_standing": "standing upright on a surface with realistic support, appetizing commercial packaging photography, crisp shadows, and ingredient styling accents",
-    "food_plated": "presented naturally on a surface, appetizing food photography, 45-degree or top-down angle, rich textures, grounded plate contact and natural styling",
-    "toy_standing": "standing securely on a clean display surface, collectible product photography, realistic occlusion shadows under the feet or base",
-    "plush_sitting": "sitting naturally on a soft surface with believable plush compression, cozy commercial styling, and soft grounded shadows",
-    "virtual_ip_character": "presented as a premium virtual mascot render with stable identity, designed for clean commercial composition and controlled studio lighting",
-    "real_human_model": "worn or presented by a real human model with natural posture, realistic fashion lighting, grounded human body volume, and premium editorial composition",
-    "bottle_standing": "standing upright with a stable base contact and realistic contact shadow directly beneath the product",
-    "box_standing": "placed solidly with realistic perspective and grounded edge shadows",
-    "3d_toy": "standing securely with realistic occlusion shadow beneath the feet or base",
-    "other_flat": "placed naturally in a grounded resting position with soft drop shadows",
-}
-
 ENVIRONMENT_TEMPLATES = {
     "apparel_flat": [
         "soft ivory editorial backdrop with diffused daylight and subtle textile styling",
@@ -220,6 +192,13 @@ SCENE_RECIPES = {
     "nature_forest_outdoor": (
         "Surrounded by lush green foliage and natural mossy rocks, dappled forest sunlight, earthy organic vibe."
     ),
+    "gourmet_morning_bakery": (
+        "Bright, airy natural morning sunlight, warm color temperature, soft bright backlighting to enhance food texture. "
+        "Mouth-watering, fresh bakery atmosphere with light pastel tones."
+    ),
+    "luxury_dark_chocolate": (
+        "Moody directional lighting, rich warm tones, elegant dark background, highlighting the glossy texture of the food."
+    ),
 }
 
 SCENE_RECIPE_FALLBACKS = {
@@ -238,8 +217,8 @@ SCENE_RECIPE_FALLBACKS = {
     "appliance_standing": ["clean_fit_minimal", "natural_skincare_luxury"],
     "furniture_room_setup": ["clean_fit_minimal", "cozy_winter_morning"],
     "home_decor_resting": ["cozy_winter_morning", "old_money_vintage"],
-    "food_packaged_standing": ["nature_forest_outdoor", "clean_fit_minimal", "cozy_winter_morning"],
-    "food_plated": ["cozy_winter_morning", "old_money_vintage", "nature_forest_outdoor"],
+    "food_packaged_standing": ["gourmet_morning_bakery", "cozy_winter_morning", "luxury_dark_chocolate"],
+    "food_plated": ["gourmet_morning_bakery", "luxury_dark_chocolate", "cozy_winter_morning"],
     "toy_standing": ["soft_girly_lifestyle", "clean_fit_minimal"],
     "plush_sitting": ["soft_girly_lifestyle", "cozy_winter_morning"],
     "virtual_ip_character": ["soft_girly_lifestyle", "clean_fit_minimal"],

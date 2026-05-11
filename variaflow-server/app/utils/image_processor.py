@@ -402,17 +402,28 @@ def _should_bypass_background_removal(sku_category: str | None) -> bool:
     return str(sku_category or "").strip().lower() in RMBG_BYPASS_SKU_CATEGORIES
 
 
+def _should_bypass_background_removal_for_subject(
+    sku_category: str | None,
+    subject_type: str | None,
+) -> bool:
+    normalized_subject_type = str(subject_type or "").strip().lower()
+    if normalized_subject_type == "human_model":
+        return True
+    return _should_bypass_background_removal(sku_category)
+
+
 def prepare_scene_edit_source_image(
     image_path: str | Path,
     temp_root: str | Path,
     *,
     sku_category: str | None,
+    subject_type: str | None = None,
     suggested_scene: str | None,
     target_size: str | None = None,
 ) -> PreparedSceneEditImage:
     source_path = Path(image_path)
     normalized_sku_category = str(sku_category or "").strip().lower()
-    if _should_bypass_background_removal(normalized_sku_category):
+    if _should_bypass_background_removal_for_subject(normalized_sku_category, subject_type):
         transparent_path = source_path
     else:
         transparent_path = ensure_transparent_background(source_path, temp_root)

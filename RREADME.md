@@ -5,85 +5,70 @@ VariaFlow 是一套面向电商商拍场景的批量 AI 出图系统，当前仓
 - `variaflow-server`：FastAPI 后端、任务调度、视觉路由、Prompt 组装、AI 网关、QC 与落盘
 - `variaflow-ui`：Vue 3 控制台，负责批次上传、任务列表、识别结果透传与状态展示
 
-## 当前核心能力
+## 当前架构重点
 
 ### 1. 智能视觉路由
 
-后端会先使用视觉模型对源图做意图识别，并输出结构化结果：
+后端会先使用视觉模型对源图做结构化分析，当前会输出：
 
 - `intent`
 - `reason`
+- `subject_type`
 - `sku_category`
 - `suggested_scene`
+- `suggested_scene_recipe`
+- `dynamic_spatial_anchor`
+- `dynamic_lighting_needs`
+- `primary_sku_description`
+- `secondary_props`
 - `subject_features`
 - `style_features`
 - `background_features`
 
-当前默认意图分流：
+其中：
 
-- `SCENE_EDIT`：商品场景重绘，走 OpenAI `gpt-image-2` 编辑链路
+- `SCENE_EDIT`：商品场景重绘，主链路走 OpenAI `gpt-image-2` 编辑接口
 - `POSE_VARIATION`：动作/造型变体
   - 普通 IP / 虚拟角色：走 OpenAI `gpt-image-2` 文生图链路
   - `real_human_model`：强制走 OpenAI `edits` 参考生成链路，保留真人身份一致性
 
-### 2. 电商 SKU 物理分类
+### 2. 从静态规则到动态分析
 
-系统已扩展为面向电商商拍的全品类物理空间分类，包含但不限于：
+系统已经从“纯 SKU 字典映射”升级为“动态物理约束生成 + 轻量兜底”的混合架构。
 
-- `apparel_flat`
-- `apparel_hanging`
-- `apparel_invisible_mannequin`
-- `shoes_resting`
-- `bag_standing`
-- `beauty_bottle_standing`
-- `jewelry_macro_display`
-- `electronic_flat`
-- `food_packaged_standing`
-- `toy_standing`
-- `plush_sitting`
-- `real_human_model`
+当前原则：
 
-这些分类会驱动后续的：
+- 优先让 Mimo 直接生成商品的物理落位和打光提示
+- 后端直接把这些动态分析结果拼进最终 Prompt
+- 如果动态字段缺失、太短或不可执行，再回退到少量内置兜底规则
 
-- 物理锚点
-- 画布补白
-- 场景配方
-- Prompt 约束
+这意味着系统不再依赖庞大的 `SPATIAL_GROUNDING_PROMPTS` 词典，但仍保留可控的保护层，避免完全裸奔。
 
-### 3. 商业场景配方引擎
+### 3. 任务卡片可解释性
 
-后端内置了结构化视觉知识库，用于提升电商主图氛围感与转化感：
+前后端任务链路现在可以透传更多 AI 思考结果：
 
-- `SPATIAL_GROUNDING_PROMPTS`：物理落地与摆放机位
-- `ENVIRONMENT_TEMPLATES`：品类配套环境模板
-- `SCENE_RECIPES`：爆品氛围配方
-- `NEGATIVE_SPACE_COMPOSITION_RULE`：营销留白规则
-- `QUALITY_TERMS` / `LIGHTING_TERMS` / `CAMERA_TERMS` / `RENDER_TERMS`：商业视觉增强词库
+- 主售卖主体 `primary_sku_description`
+- 次要配饰 `secondary_props`
+- 动态空间落位 `dynamic_spatial_anchor`
+- 动态打光需求 `dynamic_lighting_needs`
+- 场景配方键 `suggested_scene_recipe`
 
-新增高转化场景配方包括：
+这让控制台既能展示结果，也能展示 AI 为什么这样画。
 
-- `french_street_vibe`
-- `luxury_water_surface`
-- `nature_forest_outdoor`
+### 4. 预处理与真人豁免
 
-### 4. 智能画布预处理
-
-为解决“主体太满、没有留白、悬浮断肢”等问题，`SCENE_EDIT` 在调用 OpenAI 之前会做本地预处理：
+为解决“主体太满、悬浮、误抠图”等问题，`SCENE_EDIT` 在调用 OpenAI 之前会做本地预处理：
 
 - 对无透明通道图片自动执行本地静默抠图
-- 按 SKU 类型和场景配方进行动态缩放
-- 根据物理重力锚点自动放置主体
-  - `apparel_hanging`：吸顶
-  - `real_human_model`、`shoes_resting`、`toy_standing`、`appliance_standing`：沉底
-  - 其他类目：按配置居中或偏置
+- 按 SKU 类型和场景配方进行动态缩放与补白
+- 对真人模特类任务跳过 `rembg`
 
-### 5. 真人模特专线
+现在真人豁免不再只依赖 `real_human_model`，还可以通过：
 
-为避免真人模特被误抠图、断头、替换为假人，当前链路增加了专门纠偏：
+- `subject_type == human_model`
 
-- `real_human_model` 场景跳过 `rembg`
-- `POSE_VARIATION + real_human_model` 强制走 `openai_image_edit`
-- 下游 Prompt 会要求保留同一真人的面部、身形、光影与服装完整性
+来直接控制。
 
 ## 关键目录
 
@@ -106,7 +91,7 @@ VariaFlow/
     `-- README.md
 ```
 
-## 开发启动
+## 本地启动
 
 ### 后端
 
@@ -134,7 +119,7 @@ npm run dev
 
 ## 环境变量重点
 
-视觉模型已做解耦，可在 `.env` 里切换：
+视觉模型已解耦，可在 `.env` 里切换：
 
 ```env
 VARIAFLOW_VISION_PROVIDER=mimo
@@ -165,21 +150,25 @@ VARIAFLOW_OPENAI_IMAGE_API_KEY=
 
 ```powershell
 cd variaflow-server
-pytest -q tests/test_image_processor.py tests/test_openai_config_and_prompt.py tests/test_vision_router.py tests/test_ai_provider_routing.py
+pytest -q tests/test_vision_router.py tests/test_openai_config_and_prompt.py tests/test_image_processor.py tests/test_ai_provider_routing.py
 ```
 
 说明：
 
+- 当前这一组回归已覆盖动态视觉字段、Prompt 动态 grounding、食品暖调兜底、真人豁免与预处理逻辑
 - `tests/test_executor.py` 依赖本地 MySQL 测试库 `variaflow_test`
 - 若未创建 `VARIAFLOW_TEST_DATABASE_URL` 指向的测试库，完整测试不会全部通过
 
-## 最近一轮真实回归
+## 最近一轮架构演进
 
-已基于项目根目录 `image.zip` 做过真实批量验证，关键结论：
+本轮已完成以下升级：
 
-- 商品场景重绘可按 SKU 分类走智能补白与场景配方
-- 真人模特 `POSE_VARIATION` 已成功改走 `openai_image_edit`
-- 任务上下文中已能记录 `provider_hint`、`sku_category`、`suggested_scene` 与视觉特征字段
+- 引入 `subject_type`
+- 引入 `dynamic_spatial_anchor`
+- 引入 `dynamic_lighting_needs`
+- 场景重绘改为“动态物理约束生成优先”
+- 保留少量 fallback 守门逻辑，避免规则爆炸和完全失控
+- 任务接口新增动态分析字段透传
 
 ## 文档索引
 

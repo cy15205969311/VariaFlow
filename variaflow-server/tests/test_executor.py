@@ -205,8 +205,14 @@ async def test_scene_edit_uses_transparent_preprocessing_for_openai_edit(
             intent="SCENE_EDIT",
             reason="standard_product",
             raw_text='{"intent":"SCENE_EDIT"}',
+            subject_type="product_only",
             sku_category="apparel_flat",
-            suggested_scene="soft ivory editorial backdrop with diffused daylight",
+            suggested_scene="cozy_winter_morning",
+            suggested_scene_recipe="cozy_winter_morning",
+            dynamic_spatial_anchor="Laid naturally on a soft textile surface with realistic hoodie volume and grounded folds.",
+            dynamic_lighting_needs="Use cozy warm editorial lighting with soft window highlights and gentle fabric shadow transitions.",
+            primary_sku_description="white oversized hoodie",
+            secondary_props="beige scarf, coffee mug",
         )
 
     def _fake_prepare_scene_edit_source_image(
@@ -214,11 +220,13 @@ async def test_scene_edit_uses_transparent_preprocessing_for_openai_edit(
         temp_root,
         *,
         sku_category,
+        subject_type,
         suggested_scene,
         target_size,
     ):
         assert sku_category == "apparel_flat"
-        assert suggested_scene == "soft ivory editorial backdrop with diffused daylight"
+        assert subject_type == "product_only"
+        assert suggested_scene == "cozy_winter_morning"
         assert target_size == "1024x1024"
         source_path = Path(image_path)
         generated_path = Path(temp_root) / "converted.png"
@@ -254,6 +262,12 @@ async def test_scene_edit_uses_transparent_preprocessing_for_openai_edit(
     assert captured_payloads
     assert captured_payloads[0]["provider_hint"] == "openai_image_edit"
     assert captured_payloads[0]["source_image_name"] == "converted.png"
+    assert captured_payloads[0]["subject_type"] == "product_only"
+    assert captured_payloads[0]["suggested_scene_recipe"] == "cozy_winter_morning"
+    assert captured_payloads[0]["dynamic_spatial_anchor"] == "Laid naturally on a soft textile surface with realistic hoodie volume and grounded folds."
+    assert captured_payloads[0]["dynamic_lighting_needs"] == "Use cozy warm editorial lighting with soft window highlights and gentle fabric shadow transitions."
+    assert captured_payloads[0]["primary_sku_description"] == "white oversized hoodie"
+    assert captured_payloads[0]["secondary_props"] == "beige scarf, coffee mug"
     assert captured_payloads[0]["source_image_preprocessed"] is True
     assert captured_payloads[0]["source_image_background_removed"] is True
     assert captured_payloads[0]["source_image_canvas_padded"] is True
