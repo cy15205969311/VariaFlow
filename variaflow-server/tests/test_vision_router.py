@@ -21,7 +21,7 @@ from app.services.vision_router import (
 
 def test_extract_json_object_from_markdown_wrapped_response() -> None:
     raw_text = """```json
-{"intent":"POSE_VARIATION","reason":"cartoon_ip","subject_type":"product_only","sku_category":"3d_toy","suggested_scene":"","suggested_scene_recipe":"soft_girly_lifestyle","dynamic_spatial_anchor":"","dynamic_lighting_needs":"","primary_sku_description":"3D monkey mascot figure","secondary_props":"yellow jacket, candy prop","subject_features":"3D chibi monkey, big brown eyes","style_features":"3D blind-box render","background_features":"soft warm studio background"}
+{"intent":"POSE_VARIATION","reason":"cartoon_ip","subject_type":"product_only","sku_category":"3d_toy","suggested_scene":"","suggested_scene_recipe":"soft_girly_lifestyle","dynamic_spatial_prompt":"","dynamic_lighting_prompt":"","primary_sku_description":"3D monkey mascot figure","secondary_props":"yellow jacket, candy prop","subject_features":"3D chibi monkey, big brown eyes","style_features":"3D blind-box render","background_features":"soft warm studio background"}
 ```"""
     parsed = _extract_json_object(raw_text)
     assert parsed["intent"] == "POSE_VARIATION"
@@ -50,14 +50,14 @@ def test_extract_response_text_supports_content_array() -> None:
                     "content": [
                         {
                             "type": "text",
-                            "text": '{"intent":"SCENE_EDIT","reason":"standard_product","subject_type":"product_only","sku_category":"bottle_standing","suggested_scene":"natural_skincare_luxury","suggested_scene_recipe":"natural_skincare_luxury","dynamic_spatial_anchor":"Standing upright on a solid stone surface with crisp contact shadow directly beneath the base.","dynamic_lighting_needs":"Use bright reflective skincare lighting with clean highlights and controlled glass reflections.","primary_sku_description":"glass skincare bottle","secondary_props":"folded towel, glass dropper","subject_features":"","style_features":"","background_features":""}',
+                            "text": '{"intent":"SCENE_EDIT","reason":"standard_product","subject_type":"product_only","sku_category":"bottle_standing","suggested_scene":"natural_skincare_luxury","suggested_scene_recipe":"natural_skincare_luxury","dynamic_spatial_prompt":"Standing upright on a solid stone surface with crisp contact shadow directly beneath the base.","dynamic_lighting_prompt":"Use bright reflective skincare lighting with clean highlights and controlled glass reflections.","primary_sku_description":"glass skincare bottle","secondary_props":"folded towel, glass dropper","subject_features":"","style_features":"","background_features":""}',
                         }
                     ]
                 }
             }
         ]
     }
-    assert _extract_response_text(payload) == '{"intent":"SCENE_EDIT","reason":"standard_product","subject_type":"product_only","sku_category":"bottle_standing","suggested_scene":"natural_skincare_luxury","suggested_scene_recipe":"natural_skincare_luxury","dynamic_spatial_anchor":"Standing upright on a solid stone surface with crisp contact shadow directly beneath the base.","dynamic_lighting_needs":"Use bright reflective skincare lighting with clean highlights and controlled glass reflections.","primary_sku_description":"glass skincare bottle","secondary_props":"folded towel, glass dropper","subject_features":"","style_features":"","background_features":""}'
+    assert _extract_response_text(payload) == '{"intent":"SCENE_EDIT","reason":"standard_product","subject_type":"product_only","sku_category":"bottle_standing","suggested_scene":"natural_skincare_luxury","suggested_scene_recipe":"natural_skincare_luxury","dynamic_spatial_prompt":"Standing upright on a solid stone surface with crisp contact shadow directly beneath the base.","dynamic_lighting_prompt":"Use bright reflective skincare lighting with clean highlights and controlled glass reflections.","primary_sku_description":"glass skincare bottle","secondary_props":"folded towel, glass dropper","subject_features":"","style_features":"","background_features":""}'
 
 
 def test_normalize_subject_features_only_keeps_pose_variation_values() -> None:
@@ -103,8 +103,8 @@ def test_vision_system_prompt_excludes_temporary_clothing_and_props() -> None:
     assert "Do not include clothing, accessories, props, held items, gesture, pose, camera angle, or temporary styling in subject_features" in VISION_SYSTEM_PROMPT
     assert "temporary clothing, props, or temporary accessories" in VISION_SYSTEM_PROMPT
     assert "subject_type must be exactly one of: human_model, product_only." in VISION_SYSTEM_PROMPT
-    assert "dynamic_spatial_anchor" in VISION_SYSTEM_PROMPT
-    assert "dynamic_lighting_needs" in VISION_SYSTEM_PROMPT
+    assert "dynamic_spatial_prompt" in VISION_SYSTEM_PROMPT
+    assert "dynamic_lighting_prompt" in VISION_SYSTEM_PROMPT
     assert "suggested_scene" in VISION_SYSTEM_PROMPT
     assert "suggested_scene_recipe must be exactly one of these recipe keys" in VISION_SYSTEM_PROMPT
     assert "primary_sku_description" in VISION_SYSTEM_PROMPT

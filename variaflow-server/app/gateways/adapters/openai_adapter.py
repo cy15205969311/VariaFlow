@@ -52,6 +52,8 @@ class OpenAIImageAdapter:
     ) -> tuple[dict[str, str], dict[str, tuple[str, bytes, str]]]:
         prompt_text = str(payload_json.get("prompt", "") or "").strip()
         source_image_name = str(payload_json.get("source_image_name") or "source.png")
+        mask_image_bytes = payload_json.get("mask_image_bytes")
+        mask_image_name = str(payload_json.get("mask_image_name") or "mask.png")
 
         data_payload: dict[str, str] = {
             "model": str(payload_json.get("model") or self.model_name),
@@ -68,6 +70,12 @@ class OpenAIImageAdapter:
                 self._detect_mime_type(source_image_name),
             )
         }
+        if isinstance(mask_image_bytes, bytes) and mask_image_bytes:
+            files_payload["mask"] = (
+                mask_image_name,
+                mask_image_bytes,
+                self._detect_mime_type(mask_image_name),
+            )
         return data_payload, files_payload
 
     def _build_debug_snapshot(

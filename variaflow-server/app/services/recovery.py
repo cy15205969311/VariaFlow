@@ -4,6 +4,7 @@ import logging
 from datetime import datetime
 
 from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -11,6 +12,28 @@ from app.models.enums import TaskStatus
 from app.models.tasks import GenerationTask
 
 logger = logging.getLogger(__name__)
+
+RETRYABLE_LOCK_ERROR_CODES = {
+    1205,  # Lock wait timeout exceeded
+    1213,  # Deadlock found when trying to get lock
+}
+
+
+def is_retryable_lock_error(exc: Exception) -> bool:
+    if not isinstance(exc, OperationalError):
+        return False
+
+    original = getattr(exc, "orig", None)
+    args = getattr(original, "args", ())
+    if not args:
+        return False
+
+    try:
+        error_code = int(args[0])
+    except (TypeError, ValueError):
+        return False
+
+    return error_code in RETRYABLE_LOCK_ERROR_CODES
 
 
 async def recover_expired_tasks(session: AsyncSession) -> int:

@@ -29,7 +29,7 @@ pytest
 如果只想验证本轮改动，建议先跑：
 
 ```bash
-pytest -q tests/test_openai_config_and_prompt.py tests/test_qc_engine.py
+pytest -q tests/test_vision_router.py tests/test_openai_config_and_prompt.py tests/test_image_processor.py tests/test_ai_provider_routing.py tests/test_recovery.py
 ```
 
 ## 4. 当前测试重点
@@ -37,6 +37,10 @@ pytest -q tests/test_openai_config_and_prompt.py tests/test_qc_engine.py
 - Prompt Builder 是否保留原始源图扩展名
 - QC 是否能正确识别 `.part` 临时文件里的真实 PNG 内容
 - QC 是否支持通过总像素阈值接收阿里返回的近 1K 图
+- 视觉路由是否输出新字段 `dynamic_spatial_prompt` / `dynamic_lighting_prompt`
+- 场景重绘是否为真人模特自动生成背景遮罩
+- OpenAI `images/edits` 适配器是否会携带 `mask` 文件
+- 恢复逻辑是否能识别 MySQL `1213 deadlock` 与 `1205 lock wait timeout`
 
 ## 5. 测试数据清理
 - 测试启动时会自动执行 `Base.metadata.create_all` 初始化表结构
