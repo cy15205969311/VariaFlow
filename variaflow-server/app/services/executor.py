@@ -41,7 +41,7 @@ from app.services.prompt_builder import build_provider_payload
 from app.services.qc_engine import QualityCheckResult
 from app.services.qc_engine import run_rules_qc
 from app.services.vision_router import analyze_image_intent
-from app.utils.image_processor import ensure_transparent_background
+from app.utils.image_processor import prepare_scene_edit_source_image
 
 DEFAULT_QC_CONFIG = {
     "min_file_size_bytes": settings.qc_min_file_size_bytes,
@@ -75,6 +75,14 @@ def _resolve_provider_hint(intent: str) -> str:
     if normalized_intent == "POSE_VARIATION":
         return "openai_image_generation"
     return "openai_image_edit"
+
+
+def _resolve_provider_hint_for_route(intent: str, sku_category: str | None) -> str:
+    normalized_intent = str(intent or "SCENE_EDIT").strip().upper()
+    normalized_sku_category = str(sku_category or "").strip().lower()
+    if normalized_intent == "POSE_VARIATION" and normalized_sku_category == "real_human_model":
+        return "openai_image_edit"
+    return _resolve_provider_hint(normalized_intent)
 
 
 def _payload_hash(payload: dict[str, Any]) -> str:
@@ -155,7 +163,10 @@ async def _prepare_execution_context(
     )
     payload["vision_route_intent"] = vision_decision.intent
     payload["vision_route_reason"] = vision_decision.reason
-    payload["provider_hint"] = _resolve_provider_hint(vision_decision.intent)
+    payload["provider_hint"] = _resolve_provider_hint_for_route(
+        vision_decision.intent,
+        vision_decision.sku_category,
+    )
     payload["sku_category"] = vision_decision.sku_category
     payload["suggested_scene"] = vision_decision.suggested_scene
     payload["subject_features"] = vision_decision.subject_features
@@ -448,19 +459,49 @@ async def process_generation_task(
         provider_hint = str(context.payload.get("provider_hint") or "").strip().lower()
         intent = str(context.payload.get("intent") or "").strip().upper()
         if intent == "SCENE_EDIT" and provider_hint == "openai_image_edit":
-            prepared_source_path = await asyncio.to_thread(
-                ensure_transparent_background,
+            prepared_source = await asyncio.to_thread(
+                prepare_scene_edit_source_image,
                 source_image_path,
                 context.batch_output_root.parent / "preprocessed",
+                sku_category=context.payload.get("sku_category"),
+                suggested_scene=context.payload.get("suggested_scene"),
+                target_size=context.payload.get("size"),
             )
-            if prepared_source_path != source_image_path:
-                transient_source_path = prepared_source_path
-                context.payload["source_image_path"] = str(prepared_source_path)
-                context.payload["source_image_name"] = prepared_source_path.name
-                context.payload["source_image_preprocessed"] = True
-                context.prompt_snapshot.setdefault("provider_context", {})["preprocessed_source_image_path"] = str(
-                    prepared_source_path
-                )
+            transient_source_path = prepared_source.path
+            context.payload["source_image_path"] = str(prepared_source.path)
+            context.payload["source_image_name"] = prepared_source.path.name
+            context.payload["source_image_preprocessed"] = True
+            context.payload["source_image_background_removed"] = prepared_source.background_removed
+            context.payload["source_image_canvas_padded"] = prepared_source.canvas_padded
+            context.payload["source_image_anchor"] = prepared_source.anchor
+            context.payload["source_image_canvas_size"] = list(prepared_source.canvas_size)
+            context.payload["source_image_subject_bbox"] = list(prepared_source.subject_bbox)
+            context.payload["source_image_scale_ratio"] = round(prepared_source.scale_ratio, 4)
+            provider_context = context.prompt_snapshot.setdefault("provider_context", {})
+            provider_context["preprocessed_source_image_path"] = str(prepared_source.path)
+            provider_context["background_removed"] = prepared_source.background_removed
+            provider_context["canvas_padded"] = prepared_source.canvas_padded
+            provider_context["canvas_anchor"] = prepared_source.anchor
+            provider_context["canvas_size"] = list(prepared_source.canvas_size)
+            provider_context["subject_bbox"] = list(prepared_source.subject_bbox)
+            provider_context["subject_scale_ratio"] = round(prepared_source.scale_ratio, 4)
+
+            async with db_session_factory() as session:
+                task_row = (await session.execute(select(GenerationTask).where(GenerationTask.id == context.task_id))).scalar_one()
+                task_row.prompt_snapshot_json = context.prompt_snapshot
+                await session.commit()
+        elif intent == "POSE_VARIATION" and provider_hint == "openai_image_edit":
+            context.payload["source_image_preprocessed"] = False
+            context.payload["source_image_background_removed"] = False
+            context.payload["source_image_canvas_padded"] = False
+            context.prompt_snapshot.setdefault("provider_context", {})["pose_variation_reference_mode"] = (
+                "openai_edit_original_image"
+            )
+
+            async with db_session_factory() as session:
+                task_row = (await session.execute(select(GenerationTask).where(GenerationTask.id == context.task_id))).scalar_one()
+                task_row.prompt_snapshot_json = context.prompt_snapshot
+                await session.commit()
 
         async with db_session_factory() as session:
             attempt = await _create_attempt_record(

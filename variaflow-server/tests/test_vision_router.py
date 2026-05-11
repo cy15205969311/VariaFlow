@@ -69,6 +69,8 @@ def test_normalize_suggested_scene_only_keeps_scene_edit_values() -> None:
 
 def test_normalize_sku_category_falls_back_to_other_flat() -> None:
     assert _normalize_sku_category("3d_toy") == "3d_toy"
+    assert _normalize_sku_category("beauty_palette_open") == "beauty_palette_open"
+    assert _normalize_sku_category("real_human_model") == "real_human_model"
     assert _normalize_sku_category("unknown") == "other_flat"
 
 

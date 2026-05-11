@@ -121,6 +121,37 @@ def test_build_provider_payload_injects_grounding_prompt_for_scene_edit() -> Non
     assert NEGATIVE_SPACE_COMPOSITION_RULE in payload["prompt"]
 
 
+def test_build_provider_payload_supports_expanded_sku_grounding_dictionary() -> None:
+    batch = SimpleNamespace(batch_code="batch-001c")
+    source_task = SimpleNamespace(
+        source_name="S0001_src_mock.png",
+        source_ext="png",
+        source_path="E:/tmp/S0001_src_mock.png",
+        identity_profile_json={"identity_lock": "Keep the same subject identity."},
+        batch=batch,
+        id=13,
+        source_hash="expanded001",
+    )
+    generation_task = SimpleNamespace(
+        id=113,
+        variant_index=1,
+        variant_axis=SimpleNamespace(value="scene"),
+    )
+
+    payload, snapshot = build_provider_payload(
+        source_task,
+        generation_task,
+        intent="SCENE_EDIT",
+        sku_category="beauty_palette_open",
+        suggested_scene="soft_girly_lifestyle",
+    )
+
+    assert payload["sku_category"] == "beauty_palette_open"
+    assert snapshot["sku_category"] == "beauty_palette_open"
+    assert SPATIAL_GROUNDING_PROMPTS["beauty_palette_open"] in payload["prompt"]
+    assert payload["provider_hint"] == "openai_image_edit"
+
+
 def test_build_provider_payload_uses_scene_fallback_template_when_suggested_scene_missing() -> None:
     batch = SimpleNamespace(batch_code="batch-001b")
     source_task = SimpleNamespace(
@@ -208,6 +239,41 @@ def test_build_provider_payload_switches_prompt_for_pose_variation() -> None:
     assert "soft warm indoor studio gradient background" in payload["prompt"]
     for term in [QUALITY_TERMS[0], LIGHTING_TERMS[0], CAMERA_TERMS[0], RENDER_TERMS[0]]:
         assert term in payload["prompt"]
+
+
+def test_build_provider_payload_routes_real_human_pose_variation_to_openai_edit() -> None:
+    batch = SimpleNamespace(batch_code="batch-003")
+    source_task = SimpleNamespace(
+        source_name="S0003_src_mock.jpg",
+        source_ext="jpg",
+        source_path="E:/tmp/S0003_src_mock.jpg",
+        identity_profile_json={"identity_lock": "Keep the same subject identity."},
+        batch=batch,
+        id=3,
+        source_hash="ghi789",
+    )
+    generation_task = SimpleNamespace(
+        id=103,
+        variant_index=1,
+        variant_axis=SimpleNamespace(value="mixed"),
+    )
+
+    payload, snapshot = build_provider_payload(
+        source_task,
+        generation_task,
+        intent="POSE_VARIATION",
+        intent_reason="real_model",
+        sku_category="real_human_model",
+        subject_features="young female fashion model, oval face, shoulder-length dark hair, slim body proportions",
+        style_features="premium editorial fashion photography, natural human skin tones, elegant softbox lighting",
+        background_features="chic outdoor Parisian cafe atmosphere with soft city blur",
+    )
+
+    assert payload["provider_hint"] == "openai_image_edit"
+    assert snapshot["sku_category"] == "real_human_model"
+    assert "Use the provided real human model image as the direct visual reference." in payload["prompt"]
+    assert "Do not replace the person with a different model or mannequin." in payload["prompt"]
+
 
 def test_default_aliyun_imageedit_strength_is_high_enough_for_pose_variation() -> None:
     assert config_module.settings.aliyun_imageedit_strength == 0.85

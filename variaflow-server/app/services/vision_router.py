@@ -20,6 +20,25 @@ SUPPORTED_INTENTS = {INTENT_SCENE_EDIT, INTENT_POSE_VARIATION}
 SUPPORTED_SKU_CATEGORIES = {
     "apparel_flat",
     "apparel_hanging",
+    "apparel_invisible_mannequin",
+    "shoes_resting",
+    "bag_standing",
+    "accessories_flat",
+    "beauty_bottle_standing",
+    "beauty_tube_flat",
+    "beauty_palette_open",
+    "jewelry_macro_display",
+    "watch_stand_display",
+    "electronic_flat",
+    "appliance_standing",
+    "furniture_room_setup",
+    "home_decor_resting",
+    "food_packaged_standing",
+    "food_plated",
+    "toy_standing",
+    "plush_sitting",
+    "virtual_ip_character",
+    "real_human_model",
     "bottle_standing",
     "box_standing",
     "3d_toy",
@@ -32,7 +51,7 @@ VISION_SYSTEM_PROMPT = (
     "Return only valid JSON with the keys intent, reason, sku_category, suggested_scene, subject_features, style_features, and background_features. "
     "Use SCENE_EDIT for inanimate products or standard merchandise whose physical shape must stay unchanged. "
     "Use POSE_VARIATION for cartoon IP, mascots, animals, dolls, characters, or people whose pose, expression, styling, or outfit may vary. "
-    "sku_category must be exactly one of: apparel_flat, apparel_hanging, bottle_standing, box_standing, 3d_toy, other_flat. "
+    "sku_category must be exactly one of: apparel_flat, apparel_hanging, apparel_invisible_mannequin, shoes_resting, bag_standing, accessories_flat, beauty_bottle_standing, beauty_tube_flat, beauty_palette_open, jewelry_macro_display, watch_stand_display, electronic_flat, appliance_standing, furniture_room_setup, home_decor_resting, food_packaged_standing, food_plated, toy_standing, plush_sitting, virtual_ip_character, real_human_model, bottle_standing, box_standing, 3d_toy, other_flat. "
     "Choose sku_category based on the real-world physical placement that best matches the subject. "
     "For SCENE_EDIT, suggested_scene must be exactly one of these recipe keys: old_money_vintage, clean_fit_minimal, cozy_winter_morning, soft_girly_lifestyle, natural_skincare_luxury. "
     "Choose the recipe key that best matches the product's material, mood, target lifestyle, and ecommerce merchandising potential. "

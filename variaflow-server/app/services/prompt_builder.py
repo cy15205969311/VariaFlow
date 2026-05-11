@@ -271,6 +271,42 @@ def _build_scene_edit_prompt(
     )
 
 
+def _build_real_human_pose_edit_prompt(
+    *,
+    identity_lock: str,
+    fragments: dict[str, str],
+    quality_template: str,
+    subject_features: str | None = None,
+    style_features: str | None = None,
+    background_features: str | None = None,
+) -> str:
+    style_clause = style_features.strip() if style_features and style_features.strip() else (
+        "premium editorial fashion photography with realistic human skin tones, elegant lighting, and natural body volume"
+    )
+    background_clause = background_features.strip() if background_features and background_features.strip() else (
+        fragments.get("scene_fragment", "").strip() or "a premium commercial lifestyle background"
+    )
+    subject_clause = subject_features.strip() if subject_features and subject_features.strip() else (
+        "the exact same real human model identity, facial features, body proportions, and styling essence"
+    )
+    camera_clause = fragments.get("camera_fragment", "").strip()
+    style_tail = ", ".join(
+        part
+        for part in [camera_clause, fragments.get("style_fragment", "").strip(), quality_template.strip()]
+        if part
+    )
+    return (
+        "Use the provided real human model image as the direct visual reference. "
+        f"Preserve the exact same person identity and recognizability: [{subject_clause}]. "
+        f"Maintain this premium photography style and lighting language: [{style_clause}]. "
+        f"Keep the scene atmosphere aligned with: [{background_clause}]. "
+        f"{identity_lock}. "
+        "Generate a tasteful pose or styling variation of the same real person while preserving facial identity, body continuity, garment integrity, and realistic grounding. "
+        "Do not replace the person with a different model or mannequin. Do not crop off the head, hands, or feet. "
+        f"{style_tail}"
+    ).strip()
+
+
 def _resolve_scene_environment(
     *,
     suggested_scene: str | None,
@@ -382,7 +418,16 @@ def build_provider_payload(
         f"{resolved_scene_recipe} Supporting surface and lighting continuity: {resolved_supporting_environment}"
     )
     scene_variant_directive = f"in the following background environment: {resolved_scene_environment}"
-    if normalized_intent == "POSE_VARIATION":
+    if normalized_intent == "POSE_VARIATION" and normalized_sku_category == "real_human_model":
+        final_prompt = _build_real_human_pose_edit_prompt(
+            identity_lock=identity_lock,
+            fragments=fragments,
+            quality_template=quality_template,
+            subject_features=subject_features,
+            style_features=style_features,
+            background_features=background_features,
+        )
+    elif normalized_intent == "POSE_VARIATION":
         final_prompt = _build_pose_variation_prompt(
             identity_lock=identity_lock,
             fragments=fragments,
@@ -435,7 +480,13 @@ def build_provider_payload(
         "subject_features": subject_features if normalized_intent == "POSE_VARIATION" else "",
         "style_features": style_features if normalized_intent == "POSE_VARIATION" else "",
         "background_features": background_features if normalized_intent == "POSE_VARIATION" else "",
-        "provider_hint": "openai_image_generation" if normalized_intent == "POSE_VARIATION" else "openai_image_edit",
+        "provider_hint": (
+            "openai_image_edit"
+            if normalized_intent == "POSE_VARIATION" and normalized_sku_category == "real_human_model"
+            else "openai_image_generation"
+            if normalized_intent == "POSE_VARIATION"
+            else "openai_image_edit"
+        ),
     }
 
     if negative_template:

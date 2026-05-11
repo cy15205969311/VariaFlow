@@ -10,6 +10,7 @@ from app.gateways import ai_provider
 from app.models.enums import ProviderRoute, TaskStatus
 from app.models.tasks import GenerationAttempt, GenerationTask
 from app.services.executor import process_generation_task
+from app.services.executor import _resolve_provider_hint_for_route
 from app.services.scheduler import fetch_and_lock_next_generation_task
 
 
@@ -17,6 +18,11 @@ def _build_http_status_error(status_code: int, url: str, message: str) -> httpx.
     request = httpx.Request("POST", url, json={"mock": True})
     response = httpx.Response(status_code=status_code, request=request, json={"error": message})
     return httpx.HTTPStatusError(message, request=request, response=response)
+
+
+def test_resolve_provider_hint_for_real_human_pose_variation_uses_openai_edit() -> None:
+    assert _resolve_provider_hint_for_route("POSE_VARIATION", "real_human_model") == "openai_image_edit"
+    assert _resolve_provider_hint_for_route("POSE_VARIATION", "toy_standing") == "openai_image_generation"
 
 
 @pytest.mark.asyncio
@@ -203,17 +209,37 @@ async def test_scene_edit_uses_transparent_preprocessing_for_openai_edit(
             suggested_scene="soft ivory editorial backdrop with diffused daylight",
         )
 
-    def _fake_ensure_transparent_background(image_path, temp_root):
+    def _fake_prepare_scene_edit_source_image(
+        image_path,
+        temp_root,
+        *,
+        sku_category,
+        suggested_scene,
+        target_size,
+    ):
+        assert sku_category == "apparel_flat"
+        assert suggested_scene == "soft ivory editorial backdrop with diffused daylight"
+        assert target_size == "1024x1024"
         source_path = Path(image_path)
         generated_path = Path(temp_root) / "converted.png"
         generated_path.parent.mkdir(parents=True, exist_ok=True)
         generated_path.write_bytes(source_path.read_bytes())
         generated_path_holder["path"] = generated_path
-        return generated_path
+        from app.utils.image_processor import PreparedSceneEditImage
+
+        return PreparedSceneEditImage(
+            path=generated_path,
+            background_removed=True,
+            canvas_padded=True,
+            anchor="bottom_center",
+            canvas_size=(1024, 1024),
+            subject_bbox=(210, 430, 814, 940),
+            scale_ratio=0.62,
+        )
 
     monkeypatch.setattr(ai_provider, "call_ai_provider", _always_success)
     monkeypatch.setattr("app.services.executor.analyze_image_intent", _fake_analyze_image_intent)
-    monkeypatch.setattr("app.services.executor.ensure_transparent_background", _fake_ensure_transparent_background)
+    monkeypatch.setattr("app.services.executor.prepare_scene_edit_source_image", _fake_prepare_scene_edit_source_image)
 
     async with session_factory() as session:
         locked = await fetch_and_lock_next_generation_task(
@@ -229,5 +255,11 @@ async def test_scene_edit_uses_transparent_preprocessing_for_openai_edit(
     assert captured_payloads[0]["provider_hint"] == "openai_image_edit"
     assert captured_payloads[0]["source_image_name"] == "converted.png"
     assert captured_payloads[0]["source_image_preprocessed"] is True
+    assert captured_payloads[0]["source_image_background_removed"] is True
+    assert captured_payloads[0]["source_image_canvas_padded"] is True
+    assert captured_payloads[0]["source_image_anchor"] == "bottom_center"
+    assert captured_payloads[0]["source_image_canvas_size"] == [1024, 1024]
+    assert captured_payloads[0]["source_image_subject_bbox"] == [210, 430, 814, 940]
+    assert captured_payloads[0]["source_image_scale_ratio"] == 0.62
     assert "path" in generated_path_holder
     assert not generated_path_holder["path"].exists()

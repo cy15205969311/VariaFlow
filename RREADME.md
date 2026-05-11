@@ -1,120 +1,156 @@
-# VariaFlow 开发文档
+# VariaFlow 开发文档总览
 
-## 项目概览
-VariaFlow 是一个面向电商商品图与 IP 变体图的批量 AIGC 生产平台，当前采用前后端分离架构：
+VariaFlow 是一套面向电商商拍场景的批量 AI 出图系统，当前仓库包含：
 
-- `variaflow-server`：FastAPI + SQLAlchemy Async + MySQL
-- `variaflow-ui`：Vue 3 + Vite + Pinia + Element Plus
-
-当前主链路已经升级为“智能视觉路由 + 双轨生图”架构：
-
-- `SCENE_EDIT`：商品场景重绘，走 OpenAI `gpt-image-2` 的 `/v1/images/edits`
-- `POSE_VARIATION`：IP/人物动作变体，走 OpenAI `gpt-image-2` 的 `/v1/images/generations`
-- 视觉识别由可切换的多模态模型负责，当前默认使用 `mimo-v2-omni`
-
-## 目录结构
-```text
-VariaFlow/
-|-- variaflow-server/
-|   |-- app/
-|   |-- scripts/
-|   |-- sql/
-|   |-- tests/
-|   |-- .env.example
-|   `-- README.md
-|-- variaflow-ui/
-|   |-- src/
-|   `-- vite.config.js
-|-- .gitignore
-`-- RREADME.md
-```
+- `variaflow-server`：FastAPI 后端、任务调度、视觉路由、Prompt 组装、AI 网关、QC 与落盘
+- `variaflow-ui`：Vue 3 控制台，负责批次上传、任务列表、识别结果透传与状态展示
 
 ## 当前核心能力
+
 ### 1. 智能视觉路由
-后端在执行生图前会先调用视觉模型，输出以下结构化字段：
 
-- `intent`：`SCENE_EDIT` 或 `POSE_VARIATION`
-- `reason`：意图识别原因
-- `sku_category`：商品物理摆放类别
-- `suggested_scene`：推荐场景配方 key
-- `subject_features`：主体稳定身份特征
-- `style_features`：稳定画风特征
-- `background_features`：背景与氛围特征
+后端会先使用视觉模型对源图做意图识别，并输出结构化结果：
 
-其中：
+- `intent`
+- `reason`
+- `sku_category`
+- `suggested_scene`
+- `subject_features`
+- `style_features`
+- `background_features`
 
-- `SCENE_EDIT` 主要使用 `sku_category` + `suggested_scene`
-- `POSE_VARIATION` 主要使用 `subject_features` + `style_features` + `background_features`
+当前默认意图分流：
 
-### 2. 双轨生图执行
-- `SCENE_EDIT`：使用透明底图进行局部重绘，只换背景、不改主体
-- `POSE_VARIATION`：使用纯文本高保真重构 Prompt，最大限度保留 IP 气质与风格
+- `SCENE_EDIT`：商品场景重绘，走 OpenAI `gpt-image-2` 编辑链路
+- `POSE_VARIATION`：动作/造型变体
+  - 普通 IP / 虚拟角色：走 OpenAI `gpt-image-2` 文生图链路
+  - `real_human_model`：强制走 OpenAI `edits` 参考生成链路，保留真人身份一致性
 
-### 3. 商品物理落地与爆品场景配方
-后端 Prompt Builder 已内置：
+### 2. 电商 SKU 物理分类
 
-- `SPATIAL_GROUNDING_PROMPTS`：平铺、悬挂、站立等物理锚点
-- `SCENE_RECIPES`：老钱复古、极简冷感、冬日氛围等爆品场景配方
-- `NEGATIVE_SPACE_COMPOSITION_RULE`：保留营销留白，便于后续排版
+系统已扩展为面向电商商拍的全品类物理空间分类，包含但不限于：
 
-### 4. 本地静默抠图
-当用户上传的是 JPG 或不含透明通道的商品图，`SCENE_EDIT` 分支会自动调用本地 `rembg`：
+- `apparel_flat`
+- `apparel_hanging`
+- `apparel_invisible_mannequin`
+- `shoes_resting`
+- `bag_standing`
+- `beauty_bottle_standing`
+- `jewelry_macro_display`
+- `electronic_flat`
+- `food_packaged_standing`
+- `toy_standing`
+- `plush_sitting`
+- `real_human_model`
 
-- 自动检测透明通道
-- 自动抠出主体
-- 将透明 PNG 喂给 OpenAI edits
-- 任务完成后自动清理临时预处理文件
+这些分类会驱动后续的：
 
-这部分逻辑位于：
+- 物理锚点
+- 画布补白
+- 场景配方
+- Prompt 约束
 
-- [variaflow-server/app/utils/image_processor.py](/e:/e-commerce-project/VariaFlow/variaflow-server/app/utils/image_processor.py)
-- [variaflow-server/app/services/executor.py](/e:/e-commerce-project/VariaFlow/variaflow-server/app/services/executor.py)
+### 3. 商业场景配方引擎
 
-## 环境要求
-- Python 3.10+
-- Node.js 18+
-- npm 9+
-- MySQL 8.0+
+后端内置了结构化视觉知识库，用于提升电商主图氛围感与转化感：
 
-## 快速启动
+- `SPATIAL_GROUNDING_PROMPTS`：物理落地与摆放机位
+- `ENVIRONMENT_TEMPLATES`：品类配套环境模板
+- `SCENE_RECIPES`：爆品氛围配方
+- `NEGATIVE_SPACE_COMPOSITION_RULE`：营销留白规则
+- `QUALITY_TERMS` / `LIGHTING_TERMS` / `CAMERA_TERMS` / `RENDER_TERMS`：商业视觉增强词库
+
+新增高转化场景配方包括：
+
+- `french_street_vibe`
+- `luxury_water_surface`
+- `nature_forest_outdoor`
+
+### 4. 智能画布预处理
+
+为解决“主体太满、没有留白、悬浮断肢”等问题，`SCENE_EDIT` 在调用 OpenAI 之前会做本地预处理：
+
+- 对无透明通道图片自动执行本地静默抠图
+- 按 SKU 类型和场景配方进行动态缩放
+- 根据物理重力锚点自动放置主体
+  - `apparel_hanging`：吸顶
+  - `real_human_model`、`shoes_resting`、`toy_standing`、`appliance_standing`：沉底
+  - 其他类目：按配置居中或偏置
+
+### 5. 真人模特专线
+
+为避免真人模特被误抠图、断头、替换为假人，当前链路增加了专门纠偏：
+
+- `real_human_model` 场景跳过 `rembg`
+- `POSE_VARIATION + real_human_model` 强制走 `openai_image_edit`
+- 下游 Prompt 会要求保留同一真人的面部、身形、光影与服装完整性
+
+## 关键目录
+
+```text
+VariaFlow/
+|-- RREADME.md
+|-- variaflow-server/
+|   |-- app/
+|   |   |-- api/
+|   |   |-- core/
+|   |   |-- gateways/
+|   |   |-- models/
+|   |   |-- schemas/
+|   |   |-- services/
+|   |   `-- utils/
+|   |-- tests/
+|   `-- README.md
+`-- variaflow-ui/
+    |-- src/
+    `-- README.md
+```
+
+## 开发启动
+
 ### 后端
-在 `variaflow-server` 目录执行：
 
-```bash
+```powershell
+cd variaflow-server
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
 copy .env.example .env
-alembic upgrade head
 uvicorn app.main:app --reload
 ```
 
 ### 前端
-在 `variaflow-ui` 目录执行：
 
-```bash
+```powershell
+cd variaflow-ui
 npm install
 npm run dev
 ```
 
-默认联调地址：
+默认本地地址：
 
-- 前端：`http://127.0.0.1:5173`
 - 后端：`http://127.0.0.1:8000`
+- 前端：`http://127.0.0.1:5173`
 
-## 环境变量说明
-### 基础配置
+## 环境变量重点
+
+视觉模型已做解耦，可在 `.env` 里切换：
+
 ```env
-VARIAFLOW_APP_ENV=development
-VARIAFLOW_DEBUG=false
-VARIAFLOW_DATABASE_URL=mysql+aiomysql://root:password@127.0.0.1:3306/variaflow
-VARIAFLOW_TEST_DATABASE_URL=mysql+aiomysql://test_user:test_pass@127.0.0.1:3306/variaflow_test
-VARIAFLOW_DATA_ROOT=./data
-VARIAFLOW_WORKER_LEASE_SECONDS=120
-VARIAFLOW_DEFAULT_TARGET_VARIANT_COUNT=1
+VARIAFLOW_VISION_PROVIDER=mimo
+
+VARIAFLOW_MIMO_VISION_API_URL=https://token-plan-cn.xiaomimimo.com/v1
+VARIAFLOW_MIMO_VISION_MODEL=mimo-v2-omni
+VARIAFLOW_MIMO_VISION_API_KEY=
+
+VARIAFLOW_DEEPSEEK_VISION_API_URL=https://api.deepseek.com/v1
+VARIAFLOW_DEEPSEEK_VISION_MODEL=deepseek-v4-flash
+# VARIAFLOW_DEEPSEEK_VISION_MODEL=deepseek-v4-pro
+VARIAFLOW_DEEPSEEK_VISION_API_KEY=
 ```
 
-### OpenAI 生图链路
+图像生成主链路：
+
 ```env
 VARIAFLOW_IMAGE_PROVIDER=openai
 VARIAFLOW_OPENAI_IMAGE_EDIT_URL=https://api.openai.com/v1/images/edits
@@ -123,122 +159,30 @@ VARIAFLOW_OPENAI_IMAGE_MODEL=gpt-image-2
 VARIAFLOW_OPENAI_IMAGE_API_KEY=
 ```
 
-### 视觉识别模型切换
-```env
-VARIAFLOW_VISION_ROUTER_ENABLED=true
-VARIAFLOW_VISION_PROVIDER=mimo
-VARIAFLOW_VISION_REQUEST_TIMEOUT_SECONDS=45
-VARIAFLOW_VISION_DEFAULT_INTENT=SCENE_EDIT
+## 测试建议
+
+快速回归：
+
+```powershell
+cd variaflow-server
+pytest -q tests/test_image_processor.py tests/test_openai_config_and_prompt.py tests/test_vision_router.py tests/test_ai_provider_routing.py
 ```
 
-#### Mimo
-```env
-VARIAFLOW_MIMO_VISION_API_URL=https://token-plan-cn.xiaomimimo.com/v1
-VARIAFLOW_MIMO_VISION_MODEL=mimo-v2-omni
-VARIAFLOW_MIMO_VISION_API_KEY=
-```
+说明：
 
-#### DeepSeek
-```env
-VARIAFLOW_DEEPSEEK_VISION_API_URL=https://api.deepseek.com/v1
-VARIAFLOW_DEEPSEEK_VISION_MODEL=deepseek-v4-flash
-# 可选：
-# VARIAFLOW_DEEPSEEK_VISION_MODEL=deepseek-v4-pro
-VARIAFLOW_DEEPSEEK_VISION_API_KEY=
-```
+- `tests/test_executor.py` 依赖本地 MySQL 测试库 `variaflow_test`
+- 若未创建 `VARIAFLOW_TEST_DATABASE_URL` 指向的测试库，完整测试不会全部通过
 
-### 调试与容错
-```env
-VARIAFLOW_PROVIDER_DEBUG_LOG=true
-VARIAFLOW_PROVIDER_REQUEST_TIMEOUT_SECONDS=180
-VARIAFLOW_PROVIDER_ENABLE_FALLBACK=false
-```
+## 最近一轮真实回归
 
-### 质量检查
-```env
-VARIAFLOW_QC_MIN_FILE_SIZE_BYTES=51200
-VARIAFLOW_QC_MIN_WIDTH=768
-VARIAFLOW_QC_MIN_HEIGHT=752
-VARIAFLOW_QC_MIN_TOTAL_PIXELS=577536
-```
+已基于项目根目录 `image.zip` 做过真实批量验证，关键结论：
 
-## 输出目录
-所有批次文件按批次号隔离落盘：
+- 商品场景重绘可按 SKU 分类走智能补白与场景配方
+- 真人模特 `POSE_VARIATION` 已成功改走 `openai_image_edit`
+- 任务上下文中已能记录 `provider_hint`、`sku_category`、`suggested_scene` 与视觉特征字段
 
-```text
-variaflow-server/data/batch_<batch_code>/
-|-- input_archive/
-|-- input_unpacked/
-|-- normalized/
-|-- outputs/
-|   `-- S0001/
-|       `-- variant_1.png
-|-- failed/
-|-- preprocessed/
-`-- tmp/
-```
+## 文档索引
 
-目录说明：
-
-- `normalized/`：标准化后的源图
-- `outputs/`：最终通过 QC 的正式产物
-- `preprocessed/`：静默抠图的透明 PNG 中间产物
-- `tmp/`：临时写入文件与 `.part`
-- `failed/`：预留失败归档
-
-## 前端状态透出
-任务列表已支持展示智能识别结果：
-
-- `intent_label`
-- `intent_reason`
-- `sku_category`
-- `suggested_scene`
-- `subject_features`
-- `style_features`
-- `background_features`
-
-当前前端还完成了以下优化：
-
-- 任务列表工具栏改为单行 SaaS 布局
-- 支持紧凑视图切换
-- 支持前端搜索与状态筛选
-- 任务卡片支持 Tooltip 查看识别原因与主体特征
-
-## 推荐测试命令
-### 后端单测
-在 `variaflow-server` 目录执行：
-
-```bash
-pytest -q tests/test_vision_router.py tests/test_openai_config_and_prompt.py tests/test_ai_provider_routing.py tests/test_image_processor.py tests/test_qc_engine.py
-```
-
-### 说明
-- `tests/test_executor.py` 依赖本地测试库 `variaflow_test`
-- 若未创建 `VARIAFLOW_TEST_DATABASE_URL` 对应库，则不建议直接跑该文件
-
-### 前端构建
-在 `variaflow-ui` 目录执行：
-
-```bash
-npm run build
-```
-
-## 关键代码入口
-- 智能视觉路由：[variaflow-server/app/services/vision_router.py](/e:/e-commerce-project/VariaFlow/variaflow-server/app/services/vision_router.py)
-- Prompt 组装：[variaflow-server/app/services/prompt_builder.py](/e:/e-commerce-project/VariaFlow/variaflow-server/app/services/prompt_builder.py)
-- 爆品词库与场景配方：[variaflow-server/app/core/prompt_lexicon.py](/e:/e-commerce-project/VariaFlow/variaflow-server/app/core/prompt_lexicon.py)
-- 执行器：[variaflow-server/app/services/executor.py](/e:/e-commerce-project/VariaFlow/variaflow-server/app/services/executor.py)
-- 任务接口：[variaflow-server/app/api/endpoints/tasks.py](/e:/e-commerce-project/VariaFlow/variaflow-server/app/api/endpoints/tasks.py)
-- 任务卡片 UI：[variaflow-ui/src/views/Dashboard/components/TaskCard.vue](/e:/e-commerce-project/VariaFlow/variaflow-ui/src/views/Dashboard/components/TaskCard.vue)
-- 列表工具栏 UI：[variaflow-ui/src/views/Dashboard/components/FilterBar.vue](/e:/e-commerce-project/VariaFlow/variaflow-ui/src/views/Dashboard/components/FilterBar.vue)
-
-## 提交规范
-建议统一使用“类型英文 + 描述中文”的格式：
-
-```text
-feat: 引入智能视觉路由与双轨生图链路
-feat: 新增爆品场景配方与静默抠图能力
-fix: 修复任务卡片状态透出异常
-docs: 更新开发文档与环境变量说明
-test: 补充视觉路由与图片预处理测试
-```
+- 后端细节见 [variaflow-server/README.md](/e:/e-commerce-project/VariaFlow/variaflow-server/README.md)
+- 测试说明见 [variaflow-server/README_TEST.md](/e:/e-commerce-project/VariaFlow/variaflow-server/README_TEST.md)
+- 前端说明见 [variaflow-ui/README.md](/e:/e-commerce-project/VariaFlow/variaflow-ui/README.md)
