@@ -5,181 +5,30 @@ import io
 from dataclasses import dataclass
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageOps
 
 RMBG_BYPASS_SKU_CATEGORIES = {
     "real_human_model",
 }
-TOP_ALIGNED_SKU_CATEGORIES = {
-    "apparel_hanging",
-}
-BOTTOM_ALIGNED_SKU_CATEGORIES = {
+AUTO_FRAME_BOTTOM_ALIGNED_SKU_CATEGORIES = {
     "shoes_resting",
-    "real_human_model",
     "toy_standing",
+    "3d_toy",
+    "bottle_standing",
+    "beauty_bottle_standing",
+    "box_standing",
+    "bag_standing",
     "appliance_standing",
+    "food_packaged_standing",
+    "watch_stand_display",
+    "jewelry_macro_display",
 }
 DEFAULT_CANVAS_SIZE = (1024, 1024)
-DEFAULT_LAYOUT_CONFIG = {
-    "anchor": "bottom_center",
-    "max_width_ratio": 0.66,
-    "max_height_ratio": 0.60,
+AUTO_FRAME_DEFAULTS = {
+    "anchor": "center",
+    "occupancy_ratio": 0.65,
     "margin_x_ratio": 0.08,
-    "margin_y_ratio": 0.06,
-}
-SKU_LAYOUT_CONFIGS = {
-    "apparel_flat": {
-        "anchor": "bottom_center",
-        "max_width_ratio": 0.74,
-        "max_height_ratio": 0.58,
-    },
-    "apparel_hanging": {
-        "anchor": "top_center",
-        "max_width_ratio": 0.56,
-        "max_height_ratio": 0.76,
-    },
-    "apparel_invisible_mannequin": {
-        "anchor": "center_right",
-        "max_width_ratio": 0.54,
-        "max_height_ratio": 0.78,
-    },
-    "shoes_resting": {
-        "anchor": "bottom_right",
-        "max_width_ratio": 0.56,
-        "max_height_ratio": 0.44,
-    },
-    "bag_standing": {
-        "anchor": "bottom_center",
-        "max_width_ratio": 0.48,
-        "max_height_ratio": 0.60,
-    },
-    "accessories_flat": {
-        "anchor": "bottom_center",
-        "max_width_ratio": 0.60,
-        "max_height_ratio": 0.44,
-    },
-    "beauty_bottle_standing": {
-        "anchor": "bottom_center",
-        "max_width_ratio": 0.34,
-        "max_height_ratio": 0.60,
-    },
-    "beauty_tube_flat": {
-        "anchor": "bottom_right",
-        "max_width_ratio": 0.46,
-        "max_height_ratio": 0.34,
-    },
-    "beauty_palette_open": {
-        "anchor": "bottom_center",
-        "max_width_ratio": 0.52,
-        "max_height_ratio": 0.42,
-    },
-    "jewelry_macro_display": {
-        "anchor": "bottom_center",
-        "max_width_ratio": 0.24,
-        "max_height_ratio": 0.28,
-    },
-    "watch_stand_display": {
-        "anchor": "bottom_center",
-        "max_width_ratio": 0.30,
-        "max_height_ratio": 0.42,
-    },
-    "electronic_flat": {
-        "anchor": "bottom_center",
-        "max_width_ratio": 0.60,
-        "max_height_ratio": 0.42,
-    },
-    "appliance_standing": {
-        "anchor": "bottom_center",
-        "max_width_ratio": 0.50,
-        "max_height_ratio": 0.64,
-    },
-    "furniture_room_setup": {
-        "anchor": "bottom_center",
-        "max_width_ratio": 0.80,
-        "max_height_ratio": 0.72,
-    },
-    "home_decor_resting": {
-        "anchor": "bottom_right",
-        "max_width_ratio": 0.48,
-        "max_height_ratio": 0.44,
-    },
-    "food_packaged_standing": {
-        "anchor": "bottom_center",
-        "max_width_ratio": 0.42,
-        "max_height_ratio": 0.56,
-    },
-    "food_plated": {
-        "anchor": "bottom_center",
-        "max_width_ratio": 0.60,
-        "max_height_ratio": 0.42,
-    },
-    "toy_standing": {
-        "anchor": "bottom_center",
-        "max_width_ratio": 0.46,
-        "max_height_ratio": 0.58,
-    },
-    "plush_sitting": {
-        "anchor": "bottom_center",
-        "max_width_ratio": 0.52,
-        "max_height_ratio": 0.52,
-    },
-    "virtual_ip_character": {
-        "anchor": "center_right",
-        "max_width_ratio": 0.44,
-        "max_height_ratio": 0.70,
-    },
-    "real_human_model": {
-        "anchor": "bottom_center",
-        "max_width_ratio": 0.50,
-        "max_height_ratio": 0.82,
-    },
-    "bottle_standing": {
-        "anchor": "bottom_center",
-        "max_width_ratio": 0.38,
-        "max_height_ratio": 0.60,
-    },
-    "box_standing": {
-        "anchor": "bottom_right",
-        "max_width_ratio": 0.50,
-        "max_height_ratio": 0.58,
-    },
-    "3d_toy": {
-        "anchor": "bottom_center",
-        "max_width_ratio": 0.48,
-        "max_height_ratio": 0.62,
-    },
-    "other_flat": {
-        "anchor": "bottom_center",
-        "max_width_ratio": 0.68,
-        "max_height_ratio": 0.58,
-    },
-}
-SCENE_LAYOUT_OVERRIDES = {
-    "old_money_vintage": {
-        "anchor": "bottom_right",
-        "max_width_ratio": 0.62,
-        "max_height_ratio": 0.56,
-    },
-    "clean_fit_minimal": {
-        "anchor": "bottom_center",
-        "max_width_ratio": 0.58,
-        "max_height_ratio": 0.56,
-    },
-    "cozy_winter_morning": {
-        "anchor": "bottom_center",
-        "max_width_ratio": 0.70,
-        "max_height_ratio": 0.62,
-    },
-    "soft_girly_lifestyle": {
-        "anchor": "bottom_right",
-        "max_width_ratio": 0.56,
-        "max_height_ratio": 0.56,
-    },
-    "natural_skincare_luxury": {
-        "anchor": "bottom_center",
-        "max_width_ratio": 0.34,
-        "max_height_ratio": 0.58,
-    },
+    "margin_y_ratio": 0.08,
 }
 
 
@@ -192,6 +41,8 @@ class PreparedSceneEditImage:
     canvas_size: tuple[int, int]
     subject_bbox: tuple[int, int, int, int]
     scale_ratio: float
+    mask_path: Path | None = None
+    mask_generated: bool = False
 
 
 def _slugify_token(value: str | None, default: str) -> str:
@@ -242,10 +93,51 @@ def _parse_canvas_size(raw_size: str | None) -> tuple[int, int]:
     return width, height
 
 
-def _resolve_layout_config(sku_category: str | None, suggested_scene: str | None) -> dict[str, float | str]:
-    layout = dict(DEFAULT_LAYOUT_CONFIG)
-    layout.update(SKU_LAYOUT_CONFIGS.get(str(sku_category or "").strip().lower(), {}))
-    layout.update(SCENE_LAYOUT_OVERRIDES.get(str(suggested_scene or "").strip().lower(), {}))
+def _resolve_auto_frame_config(
+    sku_category: str | None,
+    subject_type: str | None,
+) -> dict[str, float | str]:
+    normalized_sku_category = str(sku_category or "").strip().lower()
+    normalized_subject_type = str(subject_type or "").strip().lower()
+    layout = dict(AUTO_FRAME_DEFAULTS)
+
+    if normalized_subject_type == "human_model":
+        layout.update(
+            {
+                "anchor": "bottom_center",
+                "occupancy_ratio": 0.48,
+                "margin_y_ratio": 0.10,
+            }
+        )
+        return layout
+
+    if normalized_sku_category == "apparel_hanging":
+        layout.update(
+            {
+                "anchor": "top_center",
+                "occupancy_ratio": 0.50,
+                "margin_y_ratio": 0.08,
+            }
+        )
+        return layout
+
+    if normalized_sku_category in AUTO_FRAME_BOTTOM_ALIGNED_SKU_CATEGORIES:
+        layout.update(
+            {
+                "anchor": "bottom_center",
+                "occupancy_ratio": 0.40,
+                "margin_y_ratio": 0.10,
+            }
+        )
+        return layout
+
+    layout.update(
+        {
+            "anchor": "center",
+            "occupancy_ratio": 0.65,
+            "margin_y_ratio": 0.08,
+        }
+    )
     return layout
 
 
@@ -283,6 +175,9 @@ def _compute_paste_offset(
     elif anchor == "center_left":
         x = margin_x
         y = max((canvas_height - subject_height) // 2, margin_y)
+    elif anchor == "center":
+        x = max((canvas_width - subject_width) // 2, margin_x)
+        y = max((canvas_height - subject_height) // 2, margin_y)
     else:
         x = max((canvas_width - subject_width) // 2, margin_x)
         y = max_y
@@ -297,6 +192,7 @@ def _compose_subject_on_canvas(
     temp_root: str | Path,
     *,
     sku_category: str | None,
+    subject_type: str | None,
     suggested_scene: str | None,
     target_size: str | None,
 ) -> PreparedSceneEditImage:
@@ -305,7 +201,7 @@ def _compose_subject_on_canvas(
     temp_dir.mkdir(parents=True, exist_ok=True)
 
     canvas_width, canvas_height = _parse_canvas_size(target_size)
-    layout = _resolve_layout_config(sku_category, suggested_scene)
+    layout = _resolve_auto_frame_config(sku_category, subject_type)
     anchor = str(layout["anchor"])
 
     with Image.open(source_path) as image:
@@ -316,8 +212,9 @@ def _compose_subject_on_canvas(
             raise RuntimeError("scene edit source image has no visible subject after preprocessing")
 
         subject_image = rgba_image.crop(subject_bbox)
-        target_width = max(1, int(canvas_width * float(layout["max_width_ratio"])))
-        target_height = max(1, int(canvas_height * float(layout["max_height_ratio"])))
+        occupancy_ratio = float(layout["occupancy_ratio"])
+        target_width = max(1, int(canvas_width * occupancy_ratio))
+        target_height = max(1, int(canvas_height * occupancy_ratio))
         scale_ratio = min(
             target_width / max(subject_image.width, 1),
             target_height / max(subject_image.height, 1),
@@ -398,6 +295,59 @@ def ensure_transparent_background(image_path: str | Path, temp_root: str | Path)
     return output_path
 
 
+def generate_background_mask(image_path: str | Path, temp_root: str | Path) -> Path:
+    source_path = Path(image_path)
+    temp_dir = Path(temp_root)
+    temp_dir.mkdir(parents=True, exist_ok=True)
+
+    source_bytes = source_path.read_bytes()
+    output_name = f"{source_path.stem}_{hashlib.sha1(source_bytes).hexdigest()[:10]}_background_mask.png"
+    output_path = temp_dir / output_name
+    if output_path.exists():
+        return output_path
+
+    try:
+        from rembg import remove
+    except ImportError as exc:
+        raise RuntimeError("rembg is required for local background masking") from exc
+
+    cutout_bytes = remove(source_bytes)
+    if not cutout_bytes:
+        raise RuntimeError("rembg returned empty image bytes while generating a background mask")
+
+    with Image.open(io.BytesIO(cutout_bytes)) as cutout_image:
+        rgba_cutout = cutout_image.convert("RGBA")
+        subject_alpha = rgba_cutout.getchannel("A")
+        if subject_alpha.getextrema()[1] == 0:
+            raise RuntimeError("background masking did not detect any visible subject")
+
+        background_edit_mask = ImageOps.invert(subject_alpha)
+        mask_rgba = background_edit_mask.convert("RGBA")
+        mask_rgba.putalpha(background_edit_mask)
+        mask_rgba.save(output_path, format="PNG")
+
+    return output_path
+
+
+def ensure_mask_compatible_edit_image(image_path: str | Path, temp_root: str | Path) -> Path:
+    source_path = Path(image_path)
+    if source_path.suffix.lower() == ".png":
+        return source_path
+
+    temp_dir = Path(temp_root)
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    source_bytes = source_path.read_bytes()
+    output_name = f"{source_path.stem}_{hashlib.sha1(source_bytes).hexdigest()[:10]}_mask_edit_source.png"
+    output_path = temp_dir / output_name
+    if output_path.exists():
+        return output_path
+
+    with Image.open(source_path) as image:
+        rgba_image = image.convert("RGBA")
+        rgba_image.save(output_path, format="PNG")
+    return output_path
+
+
 def _should_bypass_background_removal(sku_category: str | None) -> bool:
     return str(sku_category or "").strip().lower() in RMBG_BYPASS_SKU_CATEGORIES
 
@@ -423,6 +373,25 @@ def prepare_scene_edit_source_image(
 ) -> PreparedSceneEditImage:
     source_path = Path(image_path)
     normalized_sku_category = str(sku_category or "").strip().lower()
+    normalized_subject_type = str(subject_type or "").strip().lower()
+
+    if normalized_subject_type == "human_model" and normalized_sku_category == "real_human_model":
+        mask_ready_source_path = ensure_mask_compatible_edit_image(source_path, temp_root)
+        mask_path = generate_background_mask(mask_ready_source_path, temp_root)
+        with Image.open(mask_ready_source_path) as image:
+            width, height = image.size
+        return PreparedSceneEditImage(
+            path=mask_ready_source_path,
+            background_removed=False,
+            canvas_padded=False,
+            anchor="background_mask_lock_subject",
+            canvas_size=(width, height),
+            subject_bbox=(0, 0, width, height),
+            scale_ratio=1.0,
+            mask_path=mask_path,
+            mask_generated=True,
+        )
+
     if _should_bypass_background_removal_for_subject(normalized_sku_category, subject_type):
         transparent_path = source_path
     else:
@@ -433,6 +402,7 @@ def prepare_scene_edit_source_image(
         transparent_path,
         temp_root,
         sku_category=sku_category,
+        subject_type=subject_type,
         suggested_scene=suggested_scene,
         target_size=target_size,
     )
@@ -448,4 +418,6 @@ def prepare_scene_edit_source_image(
         canvas_size=prepared.canvas_size,
         subject_bbox=prepared.subject_bbox,
         scale_ratio=prepared.scale_ratio,
+        mask_path=None,
+        mask_generated=False,
     )

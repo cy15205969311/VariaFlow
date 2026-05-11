@@ -37,3 +37,6 @@ coverage/
 # 数据目录与运行时文件
 variaflow-server/data/
 *.log
+image.zip
+variaflow-server/smoke_inputs/
+variaflow-server/smoke_outputs/

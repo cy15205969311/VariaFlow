@@ -161,7 +161,7 @@ async def run_recovery_loop(*, poll_interval_seconds: float = 15.0) -> None:
     长生命周期看门狗循环，用于回收租约过期的处理中任务。
     """
 
-    from app.services.recovery import recover_expired_tasks
+    from app.services.recovery import is_retryable_lock_error, recover_expired_tasks
 
     while True:
         try:
@@ -172,6 +172,10 @@ async def run_recovery_loop(*, poll_interval_seconds: float = 15.0) -> None:
             await asyncio.sleep(poll_interval_seconds)
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception as exc:
+            if is_retryable_lock_error(exc):
+                logger.warning("恢复循环遇到可重试的数据库锁冲突，将在下个周期继续", exc_info=exc)
+                await asyncio.sleep(poll_interval_seconds)
+                continue
             logger.exception("恢复循环单次迭代失败")
             await asyncio.sleep(poll_interval_seconds)

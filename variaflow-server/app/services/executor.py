@@ -472,6 +472,7 @@ async def process_generation_task(
     temp_file: Path | None = None
     attempt_id: int | None = None
     transient_source_path: Path | None = None
+    transient_mask_path: Path | None = None
     started_at = datetime.utcnow()
 
     try:
@@ -491,7 +492,10 @@ async def process_generation_task(
                 suggested_scene=context.payload.get("suggested_scene"),
                 target_size=context.payload.get("size"),
             )
-            transient_source_path = prepared_source.path
+            if prepared_source.path != source_image_path:
+                transient_source_path = prepared_source.path
+            if prepared_source.mask_path is not None:
+                transient_mask_path = prepared_source.mask_path
             context.payload["source_image_path"] = str(prepared_source.path)
             context.payload["source_image_name"] = prepared_source.path.name
             context.payload["source_image_preprocessed"] = True
@@ -501,6 +505,9 @@ async def process_generation_task(
             context.payload["source_image_canvas_size"] = list(prepared_source.canvas_size)
             context.payload["source_image_subject_bbox"] = list(prepared_source.subject_bbox)
             context.payload["source_image_scale_ratio"] = round(prepared_source.scale_ratio, 4)
+            context.payload["source_image_mask_generated"] = prepared_source.mask_generated
+            context.payload["source_image_mask_path"] = str(prepared_source.mask_path) if prepared_source.mask_path else ""
+            context.payload["source_image_mask_name"] = prepared_source.mask_path.name if prepared_source.mask_path else ""
             provider_context = context.prompt_snapshot.setdefault("provider_context", {})
             provider_context["preprocessed_source_image_path"] = str(prepared_source.path)
             provider_context["background_removed"] = prepared_source.background_removed
@@ -509,6 +516,8 @@ async def process_generation_task(
             provider_context["canvas_size"] = list(prepared_source.canvas_size)
             provider_context["subject_bbox"] = list(prepared_source.subject_bbox)
             provider_context["subject_scale_ratio"] = round(prepared_source.scale_ratio, 4)
+            provider_context["mask_generated"] = prepared_source.mask_generated
+            provider_context["mask_path"] = str(prepared_source.mask_path) if prepared_source.mask_path else None
 
             async with db_session_factory() as session:
                 task_row = (await session.execute(select(GenerationTask).where(GenerationTask.id == context.task_id))).scalar_one()
@@ -539,6 +548,10 @@ async def process_generation_task(
         try:
             source_image_path = Path(context.payload["source_image_path"])
             source_image_bytes = await asyncio.to_thread(source_image_path.read_bytes)
+            mask_image_path = str(context.payload.get("source_image_mask_path") or "").strip()
+            if mask_image_path:
+                context.payload["mask_image_bytes"] = await asyncio.to_thread(Path(mask_image_path).read_bytes)
+                context.payload["mask_image_name"] = str(context.payload.get("source_image_mask_name") or Path(mask_image_path).name)
 
             image_bytes, response_meta = await call_ai_provider(
                 context.payload,
@@ -733,3 +746,8 @@ async def process_generation_task(
                 await asyncio.to_thread(transient_source_path.unlink, True)
             except OSError:
                 logger.warning("Failed to cleanup transient source image: %s", transient_source_path)
+        if transient_mask_path is not None and transient_mask_path.exists():
+            try:
+                await asyncio.to_thread(transient_mask_path.unlink, True)
+            except OSError:
+                logger.warning("Failed to cleanup transient mask image: %s", transient_mask_path)

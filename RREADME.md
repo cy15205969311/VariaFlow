@@ -17,8 +17,8 @@ VariaFlow 是一套面向电商商拍场景的批量 AI 出图系统，当前仓
 - `sku_category`
 - `suggested_scene`
 - `suggested_scene_recipe`
-- `dynamic_spatial_anchor`
-- `dynamic_lighting_needs`
+- `dynamic_spatial_prompt`
+- `dynamic_lighting_prompt`
 - `primary_sku_description`
 - `secondary_props`
 - `subject_features`
@@ -61,14 +61,14 @@ VariaFlow 是一套面向电商商拍场景的批量 AI 出图系统，当前仓
 为解决“主体太满、悬浮、误抠图”等问题，`SCENE_EDIT` 在调用 OpenAI 之前会做本地预处理：
 
 - 对无透明通道图片自动执行本地静默抠图
-- 按 SKU 类型和场景配方进行动态缩放与补白
-- 对真人模特类任务跳过 `rembg`
+- 对商品图执行自动缩放、透明画布补白和重力锚点排版
+- 对真人模特类任务不再裁主体，而是生成背景编辑遮罩
 
 现在真人豁免不再只依赖 `real_human_model`，还可以通过：
 
 - `subject_type == human_model`
 
-来直接控制。
+来直接控制。当前真人链路会把原图转为 `PNG` 后与自动生成的 `mask` 一起传给 OpenAI `images/edits`，从而只换背景、不动模特与配饰主体。
 
 ## 关键目录
 
@@ -150,12 +150,12 @@ VARIAFLOW_OPENAI_IMAGE_API_KEY=
 
 ```powershell
 cd variaflow-server
-pytest -q tests/test_vision_router.py tests/test_openai_config_and_prompt.py tests/test_image_processor.py tests/test_ai_provider_routing.py
+pytest -q tests/test_vision_router.py tests/test_openai_config_and_prompt.py tests/test_image_processor.py tests/test_ai_provider_routing.py tests/test_recovery.py
 ```
 
 说明：
 
-- 当前这一组回归已覆盖动态视觉字段、Prompt 动态 grounding、食品暖调兜底、真人豁免与预处理逻辑
+- 当前这一组回归已覆盖动态视觉字段、Prompt 动态 grounding、食品暖调兜底、真人遮罩链路、OpenAI `mask` 透传以及恢复逻辑中的死锁重试判定
 - `tests/test_executor.py` 依赖本地 MySQL 测试库 `variaflow_test`
 - 若未创建 `VARIAFLOW_TEST_DATABASE_URL` 指向的测试库，完整测试不会全部通过
 
@@ -163,12 +163,11 @@ pytest -q tests/test_vision_router.py tests/test_openai_config_and_prompt.py tes
 
 本轮已完成以下升级：
 
-- 引入 `subject_type`
-- 引入 `dynamic_spatial_anchor`
-- 引入 `dynamic_lighting_needs`
-- 场景重绘改为“动态物理约束生成优先”
-- 保留少量 fallback 守门逻辑，避免规则爆炸和完全失控
-- 任务接口新增动态分析字段透传
+- 视觉模型输出字段升级为 `dynamic_spatial_prompt` 与 `dynamic_lighting_prompt`，后端继续兼容旧字段名
+- 场景重绘新增真人背景遮罩链路，自动向 OpenAI `images/edits` 追加 `mask`
+- 自动补白策略收敛为三档：真人沉底、悬挂吸顶、常规商品居中
+- 执行器会把预处理元信息、遮罩文件名与是否生成遮罩持久化到任务快照
+- 新增死锁/锁等待超时识别测试，便于恢复循环后续接入重试策略
 
 ## 文档索引
 

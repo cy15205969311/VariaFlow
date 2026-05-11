@@ -5,7 +5,11 @@ from pathlib import Path
 
 from PIL import Image
 
-from app.utils.image_processor import ensure_transparent_background, prepare_scene_edit_source_image
+from app.utils.image_processor import (
+    ensure_transparent_background,
+    generate_background_mask,
+    prepare_scene_edit_source_image,
+)
 
 
 def _write_image(path: Path, mode: str, color: tuple[int, ...], image_format: str) -> None:
@@ -68,11 +72,11 @@ def test_prepare_scene_edit_source_image_pads_flat_apparel_into_bottom_center_la
     assert prepared.background_removed is False
     assert prepared.canvas_padded is True
     assert prepared.canvas_size == (1024, 1024)
-    assert prepared.anchor == "bottom_center"
+    assert prepared.anchor == "center"
     left, top, right, bottom = prepared.subject_bbox
-    assert right - left < 760
-    assert bottom > 700
-    assert top > 350
+    assert right - left <= 666
+    assert bottom < 845
+    assert top > 170
 
     with Image.open(prepared.path) as result_image:
         assert result_image.size == (1024, 1024)
@@ -98,9 +102,9 @@ def test_prepare_scene_edit_source_image_uses_scene_override_for_minimal_recipe(
 
     left, top, right, bottom = prepared.subject_bbox
     assert prepared.anchor == "bottom_center"
-    assert left > 180
-    assert right < 844
-    assert bottom > 700
+    assert left > 250
+    assert right < 774
+    assert bottom > 820
 
 
 def test_prepare_scene_edit_source_image_supports_expanded_human_model_layout(tmp_path: Path) -> None:
@@ -113,7 +117,7 @@ def test_prepare_scene_edit_source_image_supports_expanded_human_model_layout(tm
     prepared = prepare_scene_edit_source_image(
         source_path,
         tmp_path / "preprocessed",
-        sku_category="real_human_model",
+        sku_category="apparel_invisible_mannequin",
         subject_type="human_model",
         suggested_scene="clean_fit_minimal",
         target_size="1024x1024",
@@ -121,15 +125,30 @@ def test_prepare_scene_edit_source_image_supports_expanded_human_model_layout(tm
 
     left, top, right, bottom = prepared.subject_bbox
     assert prepared.anchor == "bottom_center"
-    assert bottom > 700
-    assert top > 120
+    assert bottom > 860
+    assert top > 80
     assert right - left < 640
 
 
-def test_prepare_scene_edit_source_image_bypasses_rembg_for_real_human_model(tmp_path: Path) -> None:
+def test_prepare_scene_edit_source_image_generates_background_mask_for_real_human_model(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
     source_path = tmp_path / "human_model_photo.jpg"
     image = Image.new("RGB", (320, 640), (180, 170, 160))
     image.save(source_path, format="JPEG")
+
+    transparent_buffer = io.BytesIO()
+    cutout = Image.new("RGBA", (320, 640), (0, 0, 0, 0))
+    subject = Image.new("RGBA", (180, 500), (255, 255, 255, 255))
+    cutout.paste(subject, (70, 70), subject)
+    cutout.save(transparent_buffer, format="PNG")
+
+    def _fake_remove(image_bytes: bytes) -> bytes:
+        assert image_bytes
+        return transparent_buffer.getvalue()
+
+    monkeypatch.setattr("rembg.remove", _fake_remove)
 
     prepared = prepare_scene_edit_source_image(
         source_path,
@@ -141,9 +160,12 @@ def test_prepare_scene_edit_source_image_bypasses_rembg_for_real_human_model(tmp
     )
 
     assert prepared.background_removed is False
-    assert prepared.canvas_padded is True
-    assert prepared.anchor == "bottom_center"
-
+    assert prepared.canvas_padded is False
+    assert prepared.anchor == "background_mask_lock_subject"
+    assert prepared.mask_generated is True
+    assert prepared.mask_path is not None
+    assert prepared.mask_path.exists()
+    assert prepared.path.suffix.lower() == ".png"
 
 def test_prepare_scene_edit_source_image_top_aligns_hanging_apparel(tmp_path: Path) -> None:
     source_path = tmp_path / "hanging_apparel.png"
@@ -183,3 +205,28 @@ def test_prepare_scene_edit_source_image_bypasses_rembg_for_human_subject_type_e
 
     assert prepared.background_removed is False
     assert prepared.canvas_padded is True
+
+
+def test_generate_background_mask_creates_inverted_mask(monkeypatch, tmp_path: Path) -> None:
+    source_path = tmp_path / "subject.jpg"
+    Image.new("RGB", (120, 120), (80, 80, 80)).save(source_path, format="JPEG")
+
+    transparent_buffer = io.BytesIO()
+    cutout = Image.new("RGBA", (120, 120), (0, 0, 0, 0))
+    subject = Image.new("RGBA", (60, 60), (255, 255, 255, 255))
+    cutout.paste(subject, (30, 30), subject)
+    cutout.save(transparent_buffer, format="PNG")
+
+    def _fake_remove(image_bytes: bytes) -> bytes:
+        assert image_bytes
+        return transparent_buffer.getvalue()
+
+    monkeypatch.setattr("rembg.remove", _fake_remove)
+
+    mask_path = generate_background_mask(source_path, tmp_path / "preprocessed")
+
+    assert mask_path.exists()
+    with Image.open(mask_path) as mask_image:
+        alpha = mask_image.getchannel("A")
+        assert alpha.getpixel((10, 10)) == 255
+        assert alpha.getpixel((60, 60)) == 0

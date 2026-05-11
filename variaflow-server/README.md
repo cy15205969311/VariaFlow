@@ -21,8 +21,8 @@
 - `sku_category`
 - `suggested_scene`
 - `suggested_scene_recipe`
-- `dynamic_spatial_anchor`
-- `dynamic_lighting_needs`
+- `dynamic_spatial_prompt`
+- `dynamic_lighting_prompt`
 - `primary_sku_description`
 - `secondary_props`
 - `subject_features`
@@ -40,9 +40,10 @@
 当前后端已从“纯静态类目映射”演进到“动态主路径 + 轻量兜底”：
 
 - 对 `SCENE_EDIT`，优先使用视觉模型生成的：
-  - `dynamic_spatial_anchor`
-  - `dynamic_lighting_needs`
+  - `dynamic_spatial_prompt`
+  - `dynamic_lighting_prompt`
 - 这些字段会直接拼进最终发给 OpenAI 的 Prompt
+- 进入执行器后，会统一落到任务快照里的 `dynamic_spatial_anchor` / `dynamic_lighting_needs` 字段，兼容现有前端与接口层
 - 若动态字段过短、缺失或不可执行，则使用少量后端 fallback 规则兜底
 
 这让系统不需要继续维护臃肿的全量品类静态 Prompt 字典，同时又保留足够稳定性。
@@ -63,6 +64,7 @@
 - 动态空间落位与动态打光注入
 - 智能画布补白与重力锚点
 - 本地静默抠图
+- 真人背景遮罩锁定链路
 - `human_model` 与真人模特豁免链路
 - 真人模特动作变体专线
 
@@ -127,13 +129,18 @@
 
 - 检查透明通道
 - 对非透明图片执行本地 `rembg` 静默抠图
-- 按 SKU 分类与场景进行智能补白
+- 按主体类型执行智能补白
 - 通过锚点控制主体在画布中的落位
+- 为真人模特生成只改背景的反向遮罩
+- 将非 PNG 的真人源图转换为可与遮罩配套上传的 PNG
 
 当前能力：
 
-- `subject_type == human_model` 时跳过 `rembg`
-- `real_human_model` 仍然保留专门豁免
+- `subject_type == human_model` 且 `sku_category == real_human_model` 时：
+  - 保留原主体像素
+  - 自动生成背景编辑 `mask`
+  - 直接走 OpenAI `images/edits`
+- 常规 `human_model` 会跳过静默抠图，但仍执行画布补白
 - 输出预处理元信息到 `prompt_snapshot_json`
 
 ### 4. 执行器
@@ -158,6 +165,8 @@
 - `dynamic_lighting_needs`
 - `primary_sku_description`
 - `secondary_props`
+- `source_image_mask_generated`
+- `source_image_mask_name`
 
 一起持久化进任务快照，并透传到接口层。
 
@@ -276,7 +285,7 @@ data/
 推荐快速回归：
 
 ```powershell
-pytest -q tests/test_vision_router.py tests/test_openai_config_and_prompt.py tests/test_image_processor.py tests/test_ai_provider_routing.py
+pytest -q tests/test_vision_router.py tests/test_openai_config_and_prompt.py tests/test_image_processor.py tests/test_ai_provider_routing.py tests/test_recovery.py
 ```
 
 说明：
@@ -286,7 +295,9 @@ pytest -q tests/test_vision_router.py tests/test_openai_config_and_prompt.py tes
   - 动态 grounding / lighting Prompt 注入
   - 食品暖调 recipe 强制保护
   - `human_model` 抠图豁免
+  - 真人背景遮罩生成与 OpenAI `mask` 上传
   - OpenAI 路由逻辑
+  - 恢复循环的死锁/锁等待超时识别
 - `tests/test_executor.py` 需要本地测试库 `variaflow_test`
 - 若测试库不存在，完整测试会因数据库连接失败而中断
 
@@ -296,6 +307,7 @@ pytest -q tests/test_vision_router.py tests/test_openai_config_and_prompt.py tes
 
 - 视觉模型开始直接生成可执行的物理与光影 Prompt
 - 后端只保留少量 fallback 守门逻辑
+- 真人商品图新增背景遮罩保护，避免 edits 误改模特本体
 - 既缓解了规则爆炸，也避免了现阶段完全放权带来的失控
 
 ## 相关文档

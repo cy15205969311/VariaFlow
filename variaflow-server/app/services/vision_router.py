@@ -51,7 +51,7 @@ SUPPORTED_SCENE_RECIPE_TEXT = ", ".join(SUPPORTED_SCENE_RECIPE_KEYS)
 VISION_SYSTEM_PROMPT = (
     "You are an ecommerce visual routing system. "
     "Analyze the primary subject in the image and classify it into exactly one intent. "
-    "Return only valid JSON with the keys intent, reason, subject_type, sku_category, suggested_scene, suggested_scene_recipe, dynamic_spatial_anchor, dynamic_lighting_needs, primary_sku_description, secondary_props, subject_features, style_features, and background_features. "
+    "Return only valid JSON with the keys intent, reason, subject_type, sku_category, suggested_scene, suggested_scene_recipe, dynamic_spatial_prompt, dynamic_lighting_prompt, primary_sku_description, secondary_props, subject_features, style_features, and background_features. "
     "Use SCENE_EDIT for inanimate products or standard merchandise whose physical shape must stay unchanged. "
     "Use POSE_VARIATION for cartoon IP, mascots, animals, dolls, characters, or people whose pose, expression, styling, or outfit may vary. "
     "subject_type must be exactly one of: human_model, product_only. "
@@ -63,10 +63,10 @@ VISION_SYSTEM_PROMPT = (
     "Choose the recipe key that best matches the product's material, mood, target lifestyle, conversion intent, and ecommerce merchandising potential. "
     "For SCENE_EDIT, suggested_scene must mirror suggested_scene_recipe exactly. "
     "For POSE_VARIATION, suggested_scene must be an empty string, but suggested_scene_recipe should still contain the best scene recipe key whenever a commercial scene mood would improve the result. "
-    "For SCENE_EDIT, dynamic_spatial_anchor must be a short executable English prompt that explains exactly how the subject should be physically grounded in the new scene, such as how it stands, lays, rests, hangs, or contacts the surface. "
-    "For SCENE_EDIT, dynamic_lighting_needs must be a short executable English prompt that explains the lighting and material treatment needed for the product, such as reflections, caustics, soft fabric light, appetizing warmth, or shadow structure. "
-    "For SCENE_EDIT, dynamic_spatial_anchor and dynamic_lighting_needs must be concrete, production-ready instructions rather than abstract commentary. "
-    "For POSE_VARIATION, dynamic_spatial_anchor and dynamic_lighting_needs should be empty strings. "
+    "For SCENE_EDIT, dynamic_spatial_prompt must be a short executable English prompt that explains exactly how the subject should be physically grounded in the new scene, such as how it stands, lays, rests, hangs, or contacts the surface. "
+    "For SCENE_EDIT, dynamic_lighting_prompt must be a short executable English prompt that explains the lighting and material treatment needed for the product, such as reflections, caustics, soft fabric light, appetizing warmth, or shadow structure. "
+    "For SCENE_EDIT, dynamic_spatial_prompt and dynamic_lighting_prompt must be concrete, production-ready instructions rather than abstract commentary. "
+    "For POSE_VARIATION, dynamic_spatial_prompt and dynamic_lighting_prompt should be empty strings. "
     "primary_sku_description must be a concise English description of the core sellable subject that must remain dominant, such as 'green collared knit sweater' or 'matte black ankle boots'. "
     "secondary_props must be a concise English comma-separated list of non-core accessories, styling props, or supporting items that may be optional, removable, or de-emphasized. "
     "When analyzing a real_human_model image, identify the visually dominant garment or apparel item as primary_sku_description. "
@@ -77,8 +77,8 @@ VISION_SYSTEM_PROMPT = (
     "For POSE_VARIATION, style_features must describe the stable visual style such as 3D toy render, photorealistic studio photo, cel shading, lighting mood, and material rendering. "
     "For POSE_VARIATION, background_features must describe the original background environment, color atmosphere, and scene context. "
     "Do not mention the current pose, gesture, camera angle, background, temporary clothing, props, or temporary accessories unless they are permanent identity traits. "
-    "For SCENE_EDIT, subject_features, style_features, and background_features must all be empty strings, but subject_type, sku_category, suggested_scene, suggested_scene_recipe, dynamic_spatial_anchor, dynamic_lighting_needs, and primary_sku_description must be filled. "
-    'Example: {"intent":"POSE_VARIATION","reason":"cartoon mascot character with editable pose and outfit","subject_type":"product_only","sku_category":"3d_toy","suggested_scene":"","suggested_scene_recipe":"soft_girly_lifestyle","dynamic_spatial_anchor":"","dynamic_lighting_needs":"","primary_sku_description":"3D blind-box monkey mascot figure","secondary_props":"yellow jacket, gingerbread prop","subject_features":"3D chibi cartoon monkey, large brown eyes, fluffy light brown fur, big round ears, oversized head-to-body ratio","style_features":"polished 3D blind-box render, soft global illumination, glossy collectible toy finish","background_features":"warm indoor studio backdrop with clean gradient and soft ambient shadows"}'
+    "For SCENE_EDIT, subject_features, style_features, and background_features must all be empty strings, but subject_type, sku_category, suggested_scene, suggested_scene_recipe, dynamic_spatial_prompt, dynamic_lighting_prompt, and primary_sku_description must be filled. "
+    'Example: {"intent":"POSE_VARIATION","reason":"cartoon mascot character with editable pose and outfit","subject_type":"product_only","sku_category":"3d_toy","suggested_scene":"","suggested_scene_recipe":"soft_girly_lifestyle","dynamic_spatial_prompt":"","dynamic_lighting_prompt":"","primary_sku_description":"3D blind-box monkey mascot figure","secondary_props":"yellow jacket, gingerbread prop","subject_features":"3D chibi cartoon monkey, large brown eyes, fluffy light brown fur, big round ears, oversized head-to-body ratio","style_features":"polished 3D blind-box render, soft global illumination, glossy collectible toy finish","background_features":"warm indoor studio backdrop with clean gradient and soft ambient shadows"}'
 )
 
 JSON_OBJECT_PATTERN = re.compile(r"\{.*?\}", re.DOTALL)
@@ -215,7 +215,7 @@ def _build_payload(image_data_url: str) -> dict[str, Any]:
                         "type": "text",
                         "text": (
                             "Classify this image as SCENE_EDIT or POSE_VARIATION. "
-                            "Return only JSON with intent, reason, subject_type, sku_category, suggested_scene, suggested_scene_recipe, dynamic_spatial_anchor, dynamic_lighting_needs, primary_sku_description, secondary_props, subject_features, style_features, and background_features."
+                            "Return only JSON with intent, reason, subject_type, sku_category, suggested_scene, suggested_scene_recipe, dynamic_spatial_prompt, dynamic_lighting_prompt, primary_sku_description, secondary_props, subject_features, style_features, and background_features."
                         ),
                     },
                     {
@@ -353,8 +353,14 @@ async def analyze_image_intent(
             intent,
             suggested_scene_recipe,
         )
-        dynamic_spatial_anchor = _normalize_dynamic_prompt_field(parsed.get("dynamic_spatial_anchor"), intent)
-        dynamic_lighting_needs = _normalize_dynamic_prompt_field(parsed.get("dynamic_lighting_needs"), intent)
+        dynamic_spatial_anchor = _normalize_dynamic_prompt_field(
+            parsed.get("dynamic_spatial_prompt") or parsed.get("dynamic_spatial_anchor"),
+            intent,
+        )
+        dynamic_lighting_needs = _normalize_dynamic_prompt_field(
+            parsed.get("dynamic_lighting_prompt") or parsed.get("dynamic_lighting_needs"),
+            intent,
+        )
         primary_sku_description = _normalize_text_field(parsed.get("primary_sku_description"))
         secondary_props = _normalize_text_field(parsed.get("secondary_props"))
         subject_features = _normalize_subject_features(parsed.get("subject_features"), intent)

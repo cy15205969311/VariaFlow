@@ -277,3 +277,103 @@ async def test_scene_edit_uses_transparent_preprocessing_for_openai_edit(
     assert captured_payloads[0]["source_image_scale_ratio"] == 0.62
     assert "path" in generated_path_holder
     assert not generated_path_holder["path"].exists()
+
+
+@pytest.mark.asyncio
+async def test_scene_edit_real_human_model_passes_background_mask_to_openai_edit(
+    monkeypatch: pytest.MonkeyPatch,
+    mock_batch_data: dict[str, object],
+) -> None:
+    session_factory = mock_batch_data["session_factory"]
+    captured_payloads: list[dict] = []
+    generated_paths: dict[str, Path] = {}
+
+    async def _always_success(
+        payload_json: dict,
+        provider_route: ProviderRoute = ProviderRoute.PRIMARY,
+        source_image_bytes: bytes | None = None,
+    ) -> tuple[bytes, dict]:
+        assert provider_route == ProviderRoute.PRIMARY
+        assert source_image_bytes is not None
+        captured_payloads.append(dict(payload_json))
+        adapter = ai_provider.MockAIAdapter(provider_route)
+        result = await adapter.generate(client=None, payload_json={})
+        return result.image_bytes, result.meta
+
+    async def _fake_analyze_image_intent(*, image_bytes: bytes, source_image_name: str):
+        del image_bytes, source_image_name
+        from app.services.vision_router import VisionRouteDecision
+
+        return VisionRouteDecision(
+            intent="SCENE_EDIT",
+            reason="real_human_model_scene_swap",
+            raw_text='{"intent":"SCENE_EDIT"}',
+            subject_type="human_model",
+            sku_category="real_human_model",
+            suggested_scene="french_street_vibe",
+            suggested_scene_recipe="french_street_vibe",
+            dynamic_spatial_anchor="Keep the real model naturally grounded in the frame with intact body continuity and realistic stance.",
+            dynamic_lighting_needs="Use premium editorial daylight with realistic skin tone rendering and clean garment detail.",
+            primary_sku_description="structured cream trench coat",
+            secondary_props="oversized sunglasses, leather shoulder bag",
+        )
+
+    def _fake_prepare_scene_edit_source_image(
+        image_path,
+        temp_root,
+        *,
+        sku_category,
+        subject_type,
+        suggested_scene,
+        target_size,
+    ):
+        assert sku_category == "real_human_model"
+        assert subject_type == "human_model"
+        assert suggested_scene == "french_street_vibe"
+        source_path = Path(image_path)
+        generated_source_path = Path(temp_root) / "human_source.png"
+        generated_mask_path = Path(temp_root) / "human_mask.png"
+        generated_source_path.parent.mkdir(parents=True, exist_ok=True)
+        generated_source_path.write_bytes(source_path.read_bytes())
+        generated_mask_path.write_bytes(source_path.read_bytes())
+        generated_paths["source"] = generated_source_path
+        generated_paths["mask"] = generated_mask_path
+        from app.utils.image_processor import PreparedSceneEditImage
+
+        return PreparedSceneEditImage(
+            path=generated_source_path,
+            background_removed=False,
+            canvas_padded=False,
+            anchor="background_mask_lock_subject",
+            canvas_size=(1024, 1024),
+            subject_bbox=(0, 0, 1024, 1024),
+            scale_ratio=1.0,
+            mask_path=generated_mask_path,
+            mask_generated=True,
+        )
+
+    monkeypatch.setattr(ai_provider, "call_ai_provider", _always_success)
+    monkeypatch.setattr("app.services.executor.analyze_image_intent", _fake_analyze_image_intent)
+    monkeypatch.setattr("app.services.executor.prepare_scene_edit_source_image", _fake_prepare_scene_edit_source_image)
+
+    async with session_factory() as session:
+        locked = await fetch_and_lock_next_generation_task(
+            session,
+            lease_owner="pytest-scene-edit-human-mask",
+            batch_id=int(mock_batch_data["batch_id"]),
+        )
+    assert locked is not None
+
+    await process_generation_task(locked.id, session_factory)
+
+    assert captured_payloads
+    assert captured_payloads[0]["provider_hint"] == "openai_image_edit"
+    assert captured_payloads[0]["source_image_mask_generated"] is True
+    assert captured_payloads[0]["source_image_canvas_padded"] is False
+    assert captured_payloads[0]["source_image_mask_name"] == "human_mask.png"
+    assert isinstance(captured_payloads[0]["mask_image_bytes"], bytes)
+    assert captured_payloads[0]["mask_image_name"] == "human_mask.png"
+    assert "source" in generated_paths
+    assert "mask" in generated_paths
+    assert not generated_paths["source"].exists()
+    assert not generated_paths["mask"].exists()
