@@ -45,6 +45,11 @@ ENVIRONMENT_TEMPLATES = {
         "warm boutique fitting room scene with elegant shadow falloff",
         "clean gallery-style wall with a premium rack and diffused studio lighting",
     ],
+    "apparel_leaning": [
+        "editorial wall-floor corner setup with soft directional daylight and refined grounding shadows",
+        "minimal plaster wall intersection with premium boutique lighting and elegant floor contact",
+        "clean architectural corner scene with realistic vertical and horizontal planes, balanced fashion lighting",
+    ],
     "apparel_invisible_mannequin": [
         "luxury fashion studio with seamless backdrop, soft editorial key light, and controlled negative space",
         "premium boutique campaign setup with muted wall tones and refined vertical shadow falloff",
@@ -164,33 +169,36 @@ ENVIRONMENT_TEMPLATES = {
 
 SCENE_RECIPES = {
     "old_money_vintage": (
-        "Dark rich wood surface, subtle dappled sunlight from a window blind, accompanied by aesthetic props like "
-        "an open vintage book, a cup of black coffee, and brass accessories. Moody cinematic color grading, deep shadows."
+        "Dark rich wood surface, subtle dappled sunlight from a window blind, moody cinematic color grading, deep shadows, "
+        "luxurious tonal depth, refined editorial atmosphere, and elegant negative space."
     ),
     "clean_fit_minimal": (
-        "Matte concrete or sleek white marble surface, harsh minimalist studio flash lighting, sparse geometric props "
-        "like a sleek silver watch or modern sunglasses. High contrast, desaturated cool tones."
+        "Matte concrete or sleek white marble surface, harsh minimalist studio flash lighting, extremely clean composition, "
+        "high contrast, desaturated cool tones, crisp shadow edges, and spacious negative space."
     ),
     "cozy_winter_morning": (
-        "Placed on a fluffy white wool blanket, warm golden hour morning light, soft bokeh, props include a steaming mug "
-        "and dried autumn leaves. Warm, soft, comforting atmosphere."
+        "Soft wool-like textile surface, warm golden hour morning light, soft bokeh, gentle shadow falloff, warm tonal harmony, "
+        "comforting lifestyle atmosphere, and airy premium composition."
     ),
     "soft_girly_lifestyle": (
-        "Soft blush or cream surface with airy daylight, delicate props like ribbons, perfume bottles, or a compact mirror. "
-        "Clean feminine styling, gentle highlights, dreamy premium ecommerce mood."
+        "Soft blush or cream surface with airy daylight, clean feminine styling, gentle highlights, dreamy premium ecommerce mood, "
+        "soft pastel atmosphere, and polished negative space."
     ),
     "natural_skincare_luxury": (
-        "Clean stone or travertine display surface with luminous daylight, subtle water reflections, and premium beauty props "
-        "such as folded towels, glass droppers, or botanical accents. Refined luxury skincare campaign mood."
+        "Clean stone or travertine display surface with luminous daylight, subtle water reflections, refined luxury skincare campaign mood, "
+        "high-end material contrast, and polished beauty-editorial lighting."
     ),
     "french_street_vibe": (
-        "Set in a beautiful Parisian street cafe outdoors, natural sunlight, blurred aesthetic city background, chic and elegant lifestyle."
+        "Parisian outdoor lifestyle atmosphere, natural sunlight, softly blurred aesthetic city background, chic editorial mood, "
+        "refined urban elegance, and spacious composition."
     ),
     "luxury_water_surface": (
-        "Placed gracefully on a rippling water surface, caustic light reflections, premium cosmetic presentation, ethereal soft atmosphere."
+        "Rippling water surface, caustic light reflections, premium beauty presentation, ethereal soft atmosphere, luminous transparency cues, "
+        "and elegant negative space."
     ),
     "nature_forest_outdoor": (
-        "Surrounded by lush green foliage and natural mossy rocks, dappled forest sunlight, earthy organic vibe."
+        "Lush green foliage tones, natural mossy rock textures, dappled forest sunlight, earthy organic atmosphere, realistic outdoor depth, "
+        "and premium nature-inspired styling."
     ),
     "gourmet_morning_bakery": (
         "Bright, airy natural morning sunlight, warm color temperature, soft bright backlighting to enhance food texture. "
@@ -201,9 +209,73 @@ SCENE_RECIPES = {
     ),
 }
 
+SCENE_PROP_SUGGESTIONS = {
+    "old_money_vintage": [
+        "brass accent",
+        "textured paper layer",
+        "refined leather detail",
+        "minimal archival card",
+    ],
+    "clean_fit_minimal": [
+        "geometric acrylic accent",
+        "matte metallic detail",
+        "clean architectural block",
+        "sleek monochrome card",
+    ],
+    "cozy_winter_morning": [
+        "soft knit textile accent",
+        "warm ceramic accent",
+        "folded neutral fabric",
+        "subtle dried botanical texture",
+    ],
+    "soft_girly_lifestyle": [
+        "soft ribbon accent",
+        "pastel acrylic detail",
+        "delicate pearlescent surface accent",
+        "compact mirrored reflection detail",
+    ],
+    "natural_skincare_luxury": [
+        "glass accent",
+        "folded spa textile",
+        "travertine texture detail",
+        "subtle botanical stem",
+    ],
+    "french_street_vibe": [
+        "wrought-iron cafe texture accent",
+        "linen editorial card",
+        "stone tabletop detail",
+        "soft city bokeh reflection",
+    ],
+    "luxury_water_surface": [
+        "acrylic reflection panel",
+        "translucent ripple accent",
+        "wet stone texture detail",
+        "subtle glass prism highlight",
+    ],
+    "nature_forest_outdoor": [
+        "moss texture accent",
+        "natural stone detail",
+        "soft foliage layer",
+        "organic wood grain accent",
+    ],
+    "gourmet_morning_bakery": [
+        "linen bakery cloth",
+        "crumb texture accent",
+        "parchment paper layer",
+        "warm ceramic surface detail",
+    ],
+    "luxury_dark_chocolate": [
+        "dark matte stone accent",
+        "glossy cocoa-toned surface detail",
+        "rich textured paper layer",
+        "deep brown reflective accent",
+    ],
+}
+
 SCENE_RECIPE_FALLBACKS = {
     "apparel_flat": ["old_money_vintage", "cozy_winter_morning", "clean_fit_minimal"],
     "apparel_hanging": ["french_street_vibe", "clean_fit_minimal", "old_money_vintage"],
+    "apparel_leaning": ["old_money_vintage", "clean_fit_minimal", "french_street_vibe"],
     "apparel_invisible_mannequin": ["french_street_vibe", "clean_fit_minimal", "old_money_vintage"],
     "shoes_resting": ["french_street_vibe", "clean_fit_minimal", "old_money_vintage"],
     "bag_standing": ["french_street_vibe", "old_money_vintage", "clean_fit_minimal"],

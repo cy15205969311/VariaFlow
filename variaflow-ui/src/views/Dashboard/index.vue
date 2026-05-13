@@ -75,6 +75,7 @@
 
 <script setup>
 import { computed, onBeforeUnmount, watch } from "vue";
+import { ElMessage } from "element-plus";
 
 import StatCard from "@/views/Dashboard/components/StatCard.vue";
 import TaskBoard from "@/views/Dashboard/TaskBoard.vue";
@@ -134,6 +135,14 @@ function formatStat(value) {
 
 async function handleUploadSuccess(batchId) {
   batchStore.setCurrentBatchId(batchId);
+  try {
+    await batchStore.refreshAll(batchId);
+    batchStore.startPolling(batchId);
+  } catch (error) {
+    console.error("批次上传成功，但拉取批次详情或任务列表失败", error);
+    ElMessage.error("上传已完成，但批次详情加载失败，请点击刷新状态或查看控制台日志");
+    throw error;
+  }
 }
 
 async function refreshBatch() {
@@ -154,7 +163,7 @@ watch(
     await batchStore.refreshAll(batchId);
     batchStore.startPolling(batchId);
   },
-  { immediate: true }
+  { immediate: true, flush: "post" }
 );
 
 onBeforeUnmount(() => {

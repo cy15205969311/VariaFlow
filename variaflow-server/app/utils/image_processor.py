@@ -121,6 +121,16 @@ def _resolve_auto_frame_config(
         )
         return layout
 
+    if normalized_sku_category == "apparel_leaning":
+        layout.update(
+            {
+                "anchor": "bottom_center",
+                "occupancy_ratio": 0.52,
+                "margin_y_ratio": 0.10,
+            }
+        )
+        return layout
+
     if normalized_sku_category in AUTO_FRAME_BOTTOM_ALIGNED_SKU_CATEGORIES:
         layout.update(
             {

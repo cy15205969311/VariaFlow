@@ -54,6 +54,17 @@ def _extract_sku_category(slot: GenerationTask) -> str | None:
     return None
 
 
+def _extract_material_type(slot: GenerationTask) -> str | None:
+    snapshot = slot.prompt_snapshot_json or {}
+    value = snapshot.get("material_type")
+    vision_router = snapshot.get("vision_router") or {}
+    if not value:
+        value = vision_router.get("material_type")
+    if isinstance(value, str):
+        return value.strip() or None
+    return None
+
+
 def _extract_suggested_scene(slot: GenerationTask) -> str | None:
     snapshot = slot.prompt_snapshot_json or {}
     value = snapshot.get("suggested_scene")
@@ -73,6 +84,17 @@ def _extract_snapshot_text(slot: GenerationTask, key: str) -> str | None:
         value = vision_router.get(key)
     if isinstance(value, str):
         return value.strip() or None
+    return None
+
+
+def _extract_snapshot_list(slot: GenerationTask, key: str) -> list[str] | None:
+    snapshot = slot.prompt_snapshot_json or {}
+    value = snapshot.get(key)
+    vision_router = snapshot.get("vision_router") or {}
+    if not value:
+        value = vision_router.get(key)
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()] or None
     return None
 
 
@@ -98,12 +120,15 @@ def _build_generation_task_slot_response(slot: GenerationTask) -> GenerationTask
         intent_reason=reason,
         subject_type=_extract_snapshot_text(slot, "subject_type"),
         sku_category=_extract_sku_category(slot),
+        material_type=_extract_material_type(slot),
         suggested_scene=_extract_suggested_scene(slot),
         suggested_scene_recipe=_extract_snapshot_text(slot, "suggested_scene_recipe"),
         dynamic_spatial_anchor=_extract_snapshot_text(slot, "dynamic_spatial_anchor"),
         dynamic_lighting_needs=_extract_snapshot_text(slot, "dynamic_lighting_needs"),
         primary_sku_description=_extract_snapshot_text(slot, "primary_sku_description"),
         secondary_props=_extract_snapshot_text(slot, "secondary_props"),
+        dynamic_props=_extract_snapshot_list(slot, "dynamic_props"),
+        camera_perspective=_extract_snapshot_text(slot, "camera_perspective"),
         subject_features=subject_features,
         style_features=style_features,
         background_features=background_features,

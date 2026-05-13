@@ -189,6 +189,29 @@ def test_prepare_scene_edit_source_image_top_aligns_hanging_apparel(tmp_path: Pa
     assert bottom < 900
 
 
+def test_prepare_scene_edit_source_image_bottom_aligns_leaning_apparel(tmp_path: Path) -> None:
+    source_path = tmp_path / "leaning_apparel.png"
+    canvas = Image.new("RGBA", (420, 820), (0, 0, 0, 0))
+    subject = Image.new("RGBA", (240, 700), (110, 110, 110, 255))
+    canvas.paste(subject, (90, 70), subject)
+    canvas.save(source_path, format="PNG")
+
+    prepared = prepare_scene_edit_source_image(
+        source_path,
+        tmp_path / "preprocessed",
+        sku_category="apparel_leaning",
+        subject_type="product_only",
+        suggested_scene="old_money_vintage",
+        target_size="1024x1024",
+    )
+
+    left, top, right, bottom = prepared.subject_bbox
+    assert prepared.anchor == "bottom_center"
+    assert bottom > 860
+    assert top > 100
+    assert right - left < 620
+
+
 def test_prepare_scene_edit_source_image_bypasses_rembg_for_human_subject_type_even_without_human_sku(tmp_path: Path) -> None:
     source_path = tmp_path / "editorial_model.jpg"
     image = Image.new("RGB", (360, 720), (200, 180, 170))

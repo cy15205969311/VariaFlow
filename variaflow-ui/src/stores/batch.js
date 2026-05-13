@@ -157,10 +157,19 @@ export const useBatchStore = defineStore("batch", () => {
       return;
     }
 
-    await Promise.all([
-      fetchBatchStatus(batchId, { silent }),
-      fetchTasks(batchId, { silent }),
-    ]);
+    try {
+      await Promise.all([
+        fetchBatchStatus(batchId, { silent }),
+        fetchTasks(batchId, { silent }),
+      ]);
+    } catch (error) {
+      console.error("刷新批次状态或任务列表失败", {
+        batchId,
+        silent,
+        error,
+      });
+      throw error;
+    }
   }
 
   function stopPolling() {

@@ -1,80 +1,91 @@
-# VariaFlow 开发文档总览
+# VariaFlow 开发总览
 
-VariaFlow 是一套面向电商商拍场景的批量 AI 出图系统，当前仓库包含：
+VariaFlow 是一套面向电商商拍场景的批量 AI 出图系统，当前仓库包含两个核心子项目：
 
-- `variaflow-server`：FastAPI 后端、任务调度、视觉路由、Prompt 组装、AI 网关、QC 与落盘
-- `variaflow-ui`：Vue 3 控制台，负责批次上传、任务列表、识别结果透传与状态展示
+- `variaflow-server`：FastAPI 后端，负责上传、任务切片、视觉路由、Prompt 组装、图像生成调度、QC 与结果落盘。
+- `variaflow-ui`：Vue 3 控制台，负责批次上传、任务轮询、结果展示与人工重试入口。
 
-## 当前架构重点
+## 本轮架构更新
 
-### 1. 智能视觉路由
+### 1. 视觉中枢升级为“动态分析 + 轻量知识图谱”混合架构
 
-后端会先使用视觉模型对源图做结构化分析，当前会输出：
+视觉路由不再只输出简单的 `intent`，还会补充更强的结构化结果：
 
-- `intent`
-- `reason`
 - `subject_type`
 - `sku_category`
-- `suggested_scene`
+- `primary_sku_description`
+- `secondary_props`
+- `dynamic_props`
 - `suggested_scene_recipe`
 - `dynamic_spatial_prompt`
 - `dynamic_lighting_prompt`
-- `primary_sku_description`
-- `secondary_props`
-- `subject_features`
-- `style_features`
-- `background_features`
+- `camera_perspective`
 
-其中：
+当前主原则：
 
-- `SCENE_EDIT`：商品场景重绘，主链路走 OpenAI `gpt-image-2` 编辑接口
-- `POSE_VARIATION`：动作/造型变体
-  - 普通 IP / 虚拟角色：走 OpenAI `gpt-image-2` 文生图链路
-  - `real_human_model`：强制走 OpenAI `edits` 参考生成链路，保留真人身份一致性
+- `SCENE_EDIT`：以商品不变形为核心，只重绘环境与辅陈。
+- `POSE_VARIATION`：用于 IP、角色、玩偶等动作/造型变体。
+- 只要原图里出现真实人体部位，`sku_category` 必须优先落到 `real_human_model`。
 
-### 2. 从静态规则到动态分析
+### 2. Prompt Builder 已接入电商知识图谱约束
 
-系统已经从“纯 SKU 字典映射”升级为“动态物理约束生成 + 轻量兜底”的混合架构。
+后端现在会把视觉模型输出与领域知识一起编译成最终 Prompt：
 
-当前原则：
+- 相机视角约束：`camera_perspective`
+- 类目物理约束：如鞋靴落地、服饰斜靠、真人严格锁定
+- 动态 props 过滤：默认屏蔽不合理道具，如非商务场景下的 `watch`
+- 负向保护锁：真人模特禁止新增首饰、包、帽子等配件
 
-- 优先让 Mimo 直接生成商品的物理落位和打光提示
-- 后端直接把这些动态分析结果拼进最终 Prompt
-- 如果动态字段缺失、太短或不可执行，再回退到少量内置兜底规则
+新增核心文件：
 
-这意味着系统不再依赖庞大的 `SPATIAL_GROUNDING_PROMPTS` 词典，但仍保留可控的保护层，避免完全裸奔。
+- `variaflow-server/app/core/knowledge_engine.py`
+- `variaflow-server/app/core/knowledge_graph.py`
 
-### 3. 任务卡片可解释性
+### 3. 场景重绘新增真人保护与智能排版
 
-前后端任务链路现在可以透传更多 AI 思考结果：
+`SCENE_EDIT` 在调用 OpenAI 之前会先执行本地预处理：
 
-- 主售卖主体 `primary_sku_description`
-- 次要配饰 `secondary_props`
-- 动态空间落位 `dynamic_spatial_anchor`
-- 动态打光需求 `dynamic_lighting_needs`
-- 场景配方键 `suggested_scene_recipe`
+- 普通商品：透明底处理 + 智能缩放补白 + 锚点排版
+- `apparel_leaning`：新增“斜靠墙面”底部锚定策略
+- 真人模特：不再破坏原图像素，改为生成背景编辑遮罩并走 `images/edits`
 
-这让控制台既能展示结果，也能展示 AI 为什么这样画。
+这样可以同时解决：
 
-### 4. 预处理与真人豁免
+- 商品撑满画面导致无留白
+- 鞋靴/站立主体悬浮
+- 真人模特被误抠图或被模型“换人”
 
-为解决“主体太满、悬浮、误抠图”等问题，`SCENE_EDIT` 在调用 OpenAI 之前会做本地预处理：
+### 4. 调度器已优先处理最新批次
 
-- 对无透明通道图片自动执行本地静默抠图
-- 对商品图执行自动缩放、透明画布补白和重力锚点排版
-- 对真人模特类任务不再裁主体，而是生成背景编辑遮罩
+为了解决“旧批次长期占用队列，前端看不到新批次结果”的问题，调度器现在会优先消费最新上传的运行中批次，而不是一味按最早任务 ID 排序。
 
-现在真人豁免不再只依赖 `real_human_model`，还可以通过：
+核心改动文件：
 
-- `subject_type == human_model`
+- `variaflow-server/app/services/scheduler.py`
 
-来直接控制。当前真人链路会把原图转为 `PNG` 后与自动生成的 `mask` 一起传给 OpenAI `images/edits`，从而只换背景、不动模特与配饰主体。
+### 5. 上传与前端联调链路已加固
 
-## 关键目录
+上传与轮询链路补齐了防呆逻辑：
+
+- 后端上传接口补充异常日志，ZIP 解析失败不再静默
+- 前端上传成功后，立即刷新批次和任务列表
+- 上传响应缺少 `batch.id` 时直接报错
+- 轮询刷新失败时写入控制台，避免“进度条 100% 但界面无反馈”
+
+相关文件：
+
+- `variaflow-server/app/api/endpoints/batches.py`
+- `variaflow-server/app/services/upload.py`
+- `variaflow-ui/src/views/Dashboard/components/UploadEngine.vue`
+- `variaflow-ui/src/views/Dashboard/index.vue`
+- `variaflow-ui/src/stores/batch.js`
+
+## 仓库结构
 
 ```text
 VariaFlow/
 |-- RREADME.md
+|-- image.zip
 |-- variaflow-server/
 |   |-- app/
 |   |   |-- api/
@@ -85,7 +96,8 @@ VariaFlow/
 |   |   |-- services/
 |   |   `-- utils/
 |   |-- tests/
-|   `-- README.md
+|   |-- README.md
+|   `-- README_TEST.md
 `-- variaflow-ui/
     |-- src/
     `-- README.md
@@ -117,60 +129,38 @@ npm run dev
 - 后端：`http://127.0.0.1:8000`
 - 前端：`http://127.0.0.1:5173`
 
-## 环境变量重点
+## 推荐回归
 
-视觉模型已解耦，可在 `.env` 里切换：
-
-```env
-VARIAFLOW_VISION_PROVIDER=mimo
-
-VARIAFLOW_MIMO_VISION_API_URL=https://token-plan-cn.xiaomimimo.com/v1
-VARIAFLOW_MIMO_VISION_MODEL=mimo-v2-omni
-VARIAFLOW_MIMO_VISION_API_KEY=
-
-VARIAFLOW_DEEPSEEK_VISION_API_URL=https://api.deepseek.com/v1
-VARIAFLOW_DEEPSEEK_VISION_MODEL=deepseek-v4-flash
-# VARIAFLOW_DEEPSEEK_VISION_MODEL=deepseek-v4-pro
-VARIAFLOW_DEEPSEEK_VISION_API_KEY=
-```
-
-图像生成主链路：
-
-```env
-VARIAFLOW_IMAGE_PROVIDER=openai
-VARIAFLOW_OPENAI_IMAGE_EDIT_URL=https://api.openai.com/v1/images/edits
-VARIAFLOW_OPENAI_IMAGE_GENERATION_URL=https://api.openai.com/v1/images/generations
-VARIAFLOW_OPENAI_IMAGE_MODEL=gpt-image-2
-VARIAFLOW_OPENAI_IMAGE_API_KEY=
-```
-
-## 测试建议
-
-快速回归：
+### 后端关键回归
 
 ```powershell
 cd variaflow-server
-pytest -q tests/test_vision_router.py tests/test_openai_config_and_prompt.py tests/test_image_processor.py tests/test_ai_provider_routing.py tests/test_recovery.py
+pytest -q tests/test_batches_endpoint.py tests/test_scheduler.py tests/test_recovery.py tests/test_executor.py::test_happy_path tests/test_vision_router.py tests/test_openai_config_and_prompt.py tests/test_image_processor.py
 ```
 
-说明：
+### 前端构建校验
 
-- 当前这一组回归已覆盖动态视觉字段、Prompt 动态 grounding、食品暖调兜底、真人遮罩链路、OpenAI `mask` 透传以及恢复逻辑中的死锁重试判定
-- `tests/test_executor.py` 依赖本地 MySQL 测试库 `variaflow_test`
-- 若未创建 `VARIAFLOW_TEST_DATABASE_URL` 指向的测试库，完整测试不会全部通过
-
-## 最近一轮架构演进
-
-本轮已完成以下升级：
-
-- 视觉模型输出字段升级为 `dynamic_spatial_prompt` 与 `dynamic_lighting_prompt`，后端继续兼容旧字段名
-- 场景重绘新增真人背景遮罩链路，自动向 OpenAI `images/edits` 追加 `mask`
-- 自动补白策略收敛为三档：真人沉底、悬挂吸顶、常规商品居中
-- 执行器会把预处理元信息、遮罩文件名与是否生成遮罩持久化到任务快照
-- 新增死锁/锁等待超时识别测试，便于恢复循环后续接入重试策略
+```powershell
+cd variaflow-ui
+npm run build
+```
 
 ## 文档索引
 
-- 后端细节见 [variaflow-server/README.md](/e:/e-commerce-project/VariaFlow/variaflow-server/README.md)
-- 测试说明见 [variaflow-server/README_TEST.md](/e:/e-commerce-project/VariaFlow/variaflow-server/README_TEST.md)
-- 前端说明见 [variaflow-ui/README.md](/e:/e-commerce-project/VariaFlow/variaflow-ui/README.md)
+- 后端开发说明：[variaflow-server/README.md](/e:/e-commerce-project/VariaFlow/variaflow-server/README.md)
+- 测试说明：[variaflow-server/README_TEST.md](/e:/e-commerce-project/VariaFlow/variaflow-server/README_TEST.md)
+- 前端说明：[variaflow-ui/README.md](/e:/e-commerce-project/VariaFlow/variaflow-ui/README.md)
+
+## 最新补充
+
+### 物理互斥锁与材质感知
+
+- 视觉路由现在会额外输出 `material_type`，统一收敛为 `fabric_soft / fabric_stiff / reflective_glass / leather_or_pu / matte_solid`
+- 当商品被识别为软性织物时，后端会自动拦截 `apparel_leaning`，避免卫衣、毛衣这类商品出现违背重力的靠墙姿态
+- Prompt Builder 会把材质规则作为高优先级指令注入最终 Prompt，例如玻璃焦散反射、皮革高光、针织纹理柔光
+
+### Dashboard 大图预览
+
+- 任务卡片已支持点击原图与结果图打开毛玻璃预览层
+- 预览层画框固定为 `80vmin` 正方形，统一不同图片的观感尺寸
+- 支持点击遮罩关闭、Esc 关闭、透明图白底展示

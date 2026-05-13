@@ -16,12 +16,15 @@ class GenerationTaskSlotResponse(BaseModel):
     intent_reason: str | None = None
     subject_type: str | None = None
     sku_category: str | None = None
+    material_type: str | None = None
     suggested_scene: str | None = None
     suggested_scene_recipe: str | None = None
     dynamic_spatial_anchor: str | None = None
     dynamic_lighting_needs: str | None = None
     primary_sku_description: str | None = None
     secondary_props: str | None = None
+    dynamic_props: list[str] | None = None
+    camera_perspective: str | None = None
     subject_features: str | None = None
     style_features: str | None = None
     background_features: str | None = None

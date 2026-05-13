@@ -45,7 +45,7 @@ def _build_mock_image_bytes(provider_code: str, provider_route: ProviderRoute) -
     draw.text((90, 210), f"Generated At: {timestamp}", fill=(10, 10, 10))
 
     buffer = io.BytesIO()
-    image.save(buffer, format="PNG", optimize=False)
+    image.save(buffer, format="PNG", optimize=False, compress_level=0)
     return buffer.getvalue()
 
 

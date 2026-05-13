@@ -49,7 +49,15 @@
     <div class="flex gap-2" :class="compact ? 'items-start' : ''">
       <div
         class="shrink-0 overflow-hidden rounded border border-gray-100 bg-[#F3F4F6] shadow-inner"
-        :class="compact ? 'h-[56px] w-[56px]' : 'h-[60px] w-[60px]'"
+        :class="[
+          compact ? 'h-[56px] w-[56px]' : 'h-[60px] w-[60px]',
+          sourcePreviewUrl ? 'cursor-zoom-in transition-opacity duration-200 hover:opacity-90' : '',
+        ]"
+        :role="sourcePreviewUrl ? 'button' : undefined"
+        :tabindex="sourcePreviewUrl ? 0 : undefined"
+        @click="emitPreview(sourcePreviewUrl, `${displayTitle} 原图预览`)"
+        @keydown.enter.prevent="emitPreview(sourcePreviewUrl, `${displayTitle} 原图预览`)"
+        @keydown.space.prevent="emitPreview(sourcePreviewUrl, `${displayTitle} 原图预览`)"
       >
         <el-image
           v-if="sourcePreviewUrl"
@@ -73,7 +81,16 @@
           v-for="slot in paddedGenerationTasks"
           :key="slot.key"
           class="relative shrink-0 overflow-hidden rounded border"
-          :class="[compact ? 'h-[56px] w-[56px]' : 'h-[60px] w-[60px]', slotClassName(slot)]"
+          :class="[
+            compact ? 'h-[56px] w-[56px]' : 'h-[60px] w-[60px]',
+            slotClassName(slot),
+            isPreviewableSlot(slot) ? 'cursor-zoom-in transition-opacity duration-200 hover:opacity-90' : '',
+          ]"
+          :role="isPreviewableSlot(slot) ? 'button' : undefined"
+          :tabindex="isPreviewableSlot(slot) ? 0 : undefined"
+          @click="handleSlotPreview(slot)"
+          @keydown.enter.prevent="handleSlotPreview(slot)"
+          @keydown.space.prevent="handleSlotPreview(slot)"
         >
           <template v-if="slot.isEmpty">
             <div class="flex h-full w-full items-center justify-center bg-[#FAFAFA] text-gray-300">
@@ -163,7 +180,7 @@ const props = defineProps({
   },
 });
 
-defineEmits(["retry-slot"]);
+const emit = defineEmits(["retry-slot", "preview-image"]);
 
 const sourcePreviewUrl = computed(() => resolvePreviewUrl(props.task.normalized_path || props.task.source_path));
 const sourceIndexLabel = computed(() => String(props.task.source_index || 0).padStart(3, "0"));
@@ -267,8 +284,34 @@ function isSuccessSlot(slot) {
   return slot.status === "success" || slot.status === "fallback_success";
 }
 
+function isPreviewableSlot(slot) {
+  return isSuccessSlot(slot) && !!resolvePreviewUrl(slot.output_path);
+}
+
 function isProcessingSlot(slot) {
   return slot.status === "processing" || slot.status === "retrying";
+}
+
+function emitPreview(url, alt) {
+  if (!url) {
+    return;
+  }
+
+  emit("preview-image", {
+    url,
+    alt,
+  });
+}
+
+function handleSlotPreview(slot) {
+  if (!isPreviewableSlot(slot)) {
+    return;
+  }
+
+  emitPreview(
+    resolvePreviewUrl(slot.output_path),
+    `${displayTitle.value} 生成结果预览`
+  );
 }
 
 function slotClassName(slot) {

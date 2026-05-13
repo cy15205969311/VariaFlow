@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 import pytest_asyncio
+from sqlalchemy.pool import NullPool
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -59,6 +60,7 @@ TEST_ENGINE: AsyncEngine = create_async_engine(
     settings.test_database_url,
     echo=settings.debug,
     pool_pre_ping=True,
+    poolclass=NullPool,
     future=True,
 )
 TestSessionLocal = async_sessionmaker(

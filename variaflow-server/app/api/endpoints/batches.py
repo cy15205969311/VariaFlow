@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,6 +12,7 @@ from app.schemas.batches import BatchResponse
 from app.services.upload import process_upload
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def _estimate_remaining_seconds(batch: BatchJob) -> int | None:
@@ -52,8 +55,30 @@ async def upload_batch_zip(
             detail="文件类型不受支持，请上传 ZIP 压缩包。",
         )
 
-    batch = await process_upload(file, session)
-    return _to_batch_response(batch)
+    try:
+        batch = await process_upload(file, session)
+        return _to_batch_response(batch)
+    except HTTPException:
+        logger.exception(
+            "ZIP解析或任务创建失败",
+            extra={
+                "upload_filename": file.filename,
+                "upload_content_type": file.content_type,
+            },
+        )
+        raise
+    except Exception as exc:
+        logger.exception(
+            "ZIP解析或任务创建失败",
+            extra={
+                "upload_filename": file.filename,
+                "upload_content_type": file.content_type,
+            },
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"ZIP解析或任务创建失败: {exc}",
+        ) from exc
 
 
 @router.get("/{batch_id}", response_model=BatchResponse)

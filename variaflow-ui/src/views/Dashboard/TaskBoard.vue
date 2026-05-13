@@ -61,6 +61,7 @@
               :task="task"
               :compact="compactView"
               @retry-slot="handleRetrySlot"
+              @preview-image="handlePreviewImage"
             />
           </div>
         </div>
@@ -79,17 +80,25 @@
         </div>
       </footer>
     </article>
+
+    <ImageLightbox
+      :open="isPreviewOpen"
+      :image-url="currentPreviewUrl"
+      :alt="currentPreviewAlt"
+      @close="closePreview"
+    />
   </section>
 </template>
 
 <script setup>
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useVirtualList } from "@vueuse/core";
 import { ElMessage } from "element-plus";
 
 import { retryGenerationTask } from "@/api/task";
 import { useBatchStore } from "@/stores/batch";
 import FilterBar from "@/views/Dashboard/components/FilterBar.vue";
+import ImageLightbox from "@/views/Dashboard/components/ImageLightbox.vue";
 import TaskCard from "@/views/Dashboard/components/TaskCard.vue";
 
 const GRID_COLUMNS = 3;
@@ -101,6 +110,12 @@ const batchStore = useBatchStore();
 const activeFilter = ref("all");
 const searchKeyword = ref("");
 const compactView = ref(true);
+const isPreviewOpen = ref(false);
+const currentPreviewUrl = ref("");
+const currentPreviewAlt = ref("");
+
+let previewResetTimer = null;
+let previousBodyOverflow = "";
 
 const filteredTasks = computed(() => {
   const keyword = searchKeyword.value.trim().toLowerCase();
@@ -176,11 +191,83 @@ async function handleRetrySlot(slot) {
   }
 }
 
+function syncBodyScroll(locked) {
+  if (typeof document === "undefined") {
+    return;
+  }
+
+  if (locked) {
+    if (!isPreviewOpen.value) {
+      previousBodyOverflow = document.body.style.overflow;
+    }
+    document.body.style.overflow = "hidden";
+    return;
+  }
+
+  document.body.style.overflow = previousBodyOverflow;
+  previousBodyOverflow = "";
+}
+
+function openPreview(url, alt = "高清预览") {
+  if (!url) {
+    return;
+  }
+
+  if (previewResetTimer) {
+    clearTimeout(previewResetTimer);
+    previewResetTimer = null;
+  }
+
+  currentPreviewUrl.value = url;
+  currentPreviewAlt.value = alt;
+  isPreviewOpen.value = true;
+  syncBodyScroll(true);
+}
+
+function closePreview() {
+  if (!isPreviewOpen.value && !currentPreviewUrl.value) {
+    return;
+  }
+
+  isPreviewOpen.value = false;
+  syncBodyScroll(false);
+
+  if (previewResetTimer) {
+    clearTimeout(previewResetTimer);
+  }
+
+  previewResetTimer = window.setTimeout(() => {
+    currentPreviewUrl.value = "";
+    currentPreviewAlt.value = "";
+    previewResetTimer = null;
+  }, 300);
+}
+
+function handlePreviewImage(payload) {
+  if (!payload) {
+    return;
+  }
+
+  if (typeof payload === "string") {
+    openPreview(payload);
+    return;
+  }
+
+  openPreview(payload.url, payload.alt || "高清预览");
+}
+
 watch([activeFilter, searchKeyword], () => {
   const containerElement = containerProps.ref?.value;
   if (containerElement) {
     containerElement.scrollTop = 0;
   }
+});
+
+onBeforeUnmount(() => {
+  if (previewResetTimer) {
+    clearTimeout(previewResetTimer);
+  }
+  syncBodyScroll(false);
 });
 </script>
 

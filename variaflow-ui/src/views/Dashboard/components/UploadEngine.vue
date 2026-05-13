@@ -119,6 +119,8 @@ async function submitUpload() {
     await handleCustomUpload({ file: selectedFile.value });
   } catch (error) {
     console.error(error);
+    uploadProgress.value = 0;
+    uploading.value = false;
   }
 }
 
@@ -143,6 +145,10 @@ async function handleCustomUpload(options) {
       );
     });
 
+    if (!batch || !Number.isInteger(Number(batch.id))) {
+      throw new Error("上传接口返回的数据结构不完整，缺少 batch.id");
+    }
+
     ElMessage.success(`上传成功，批次 #${batch.id} 已创建`);
     selectedFile.value = null;
     uploadProgress.value = 100;
@@ -150,6 +156,7 @@ async function handleCustomUpload(options) {
     emit("upload-success", batch.id);
     options.onSuccess?.(batch);
   } catch (error) {
+    uploadProgress.value = 0;
     options.onError?.(error);
     throw error;
   } finally {
