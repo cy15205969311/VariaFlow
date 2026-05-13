@@ -22,6 +22,8 @@ class GenerationTaskSlotResponse(BaseModel):
     dynamic_lighting_needs: str | None = None
     primary_sku_description: str | None = None
     secondary_props: str | None = None
+    dynamic_props: list[str] | None = None
+    camera_perspective: str | None = None
     subject_features: str | None = None
     style_features: str | None = None
     background_features: str | None = None

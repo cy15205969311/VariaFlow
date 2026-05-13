@@ -157,6 +157,7 @@ async def _prepare_execution_context(
         intent_reason=vision_decision.reason,
         primary_sku_description=vision_decision.primary_sku_description,
         secondary_props=vision_decision.secondary_props,
+        dynamic_props=vision_decision.dynamic_props,
         subject_features=vision_decision.subject_features,
         style_features=vision_decision.style_features,
         background_features=vision_decision.background_features,
@@ -165,6 +166,8 @@ async def _prepare_execution_context(
         suggested_scene_recipe=vision_decision.suggested_scene_recipe,
         dynamic_spatial_anchor=vision_decision.dynamic_spatial_anchor,
         dynamic_lighting_needs=vision_decision.dynamic_lighting_needs,
+        subject_type=vision_decision.subject_type,
+        camera_perspective=vision_decision.camera_perspective,
     )
     payload["vision_route_intent"] = vision_decision.intent
     payload["vision_route_reason"] = vision_decision.reason
@@ -180,6 +183,8 @@ async def _prepare_execution_context(
     payload["dynamic_lighting_needs"] = vision_decision.dynamic_lighting_needs
     payload["primary_sku_description"] = vision_decision.primary_sku_description
     payload["secondary_props"] = vision_decision.secondary_props
+    payload["dynamic_props"] = vision_decision.dynamic_props or []
+    payload["camera_perspective"] = vision_decision.camera_perspective
     payload["subject_features"] = vision_decision.subject_features
     payload["style_features"] = vision_decision.style_features
     payload["background_features"] = vision_decision.background_features
@@ -191,6 +196,8 @@ async def _prepare_execution_context(
     prompt_snapshot["dynamic_lighting_needs"] = vision_decision.dynamic_lighting_needs
     prompt_snapshot["primary_sku_description"] = vision_decision.primary_sku_description
     prompt_snapshot["secondary_props"] = vision_decision.secondary_props
+    prompt_snapshot["dynamic_props"] = vision_decision.dynamic_props or []
+    prompt_snapshot["camera_perspective"] = vision_decision.camera_perspective
     prompt_snapshot["subject_features"] = vision_decision.subject_features
     prompt_snapshot["style_features"] = vision_decision.style_features
     prompt_snapshot["background_features"] = vision_decision.background_features
@@ -206,6 +213,8 @@ async def _prepare_execution_context(
         "dynamic_lighting_needs": vision_decision.dynamic_lighting_needs,
         "primary_sku_description": vision_decision.primary_sku_description,
         "secondary_props": vision_decision.secondary_props,
+        "dynamic_props": vision_decision.dynamic_props or [],
+        "camera_perspective": vision_decision.camera_perspective,
         "subject_features": vision_decision.subject_features,
         "style_features": vision_decision.style_features,
         "background_features": vision_decision.background_features,

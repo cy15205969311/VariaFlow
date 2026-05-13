@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 import shutil
 import uuid
 import zipfile
@@ -17,6 +18,7 @@ from app.models.enums import BatchStatus, ExportStatus, SourceTaskStatus, TaskSt
 from app.models.tasks import BatchJob, GenerationTask, SourceTask
 
 ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -192,19 +194,29 @@ async def process_upload(file: UploadFile, session: AsyncSession) -> BatchJob:
             unpacked_root=unpacked_root,
         )
     except zipfile.BadZipFile as exc:
+        logger.exception("ZIP解析失败：非法压缩包", extra={"archive_name": archive_name, "batch_code": batch_code})
         await asyncio.to_thread(shutil.rmtree, batch_root, True)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="上传文件不是合法的 ZIP 压缩包。",
         ) from exc
     except HTTPException:
+        logger.exception("ZIP解析或图片归一化失败", extra={"archive_name": archive_name, "batch_code": batch_code})
         await asyncio.to_thread(shutil.rmtree, batch_root, True)
         raise
     except OSError as exc:
+        logger.exception("ZIP上传文件系统操作失败", extra={"archive_name": archive_name, "batch_code": batch_code})
         await asyncio.to_thread(shutil.rmtree, batch_root, True)
         raise HTTPException(
             status_code=status.HTTP_507_INSUFFICIENT_STORAGE,
             detail=f"文件系统操作失败：{exc}",
+        ) from exc
+    except Exception as exc:
+        logger.exception("ZIP解析或任务创建失败", extra={"archive_name": archive_name, "batch_code": batch_code})
+        await asyncio.to_thread(shutil.rmtree, batch_root, True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"ZIP解析或任务创建失败: {exc}",
         ) from exc
 
     target_variant_count = (
@@ -269,6 +281,15 @@ async def process_upload(file: UploadFile, session: AsyncSession) -> BatchJob:
             batch.scheduler_started_at = datetime.utcnow()
         await session.refresh(batch)
     except Exception as exc:
+        logger.exception(
+            "批次写库失败",
+            extra={
+                "archive_name": archive_name,
+                "batch_code": batch_code,
+                "total_source_count": total_source_count,
+                "total_generation_count": total_generation_count,
+            },
+        )
         await asyncio.to_thread(shutil.rmtree, batch_root, True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

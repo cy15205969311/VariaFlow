@@ -76,6 +76,17 @@ def _extract_snapshot_text(slot: GenerationTask, key: str) -> str | None:
     return None
 
 
+def _extract_snapshot_list(slot: GenerationTask, key: str) -> list[str] | None:
+    snapshot = slot.prompt_snapshot_json or {}
+    value = snapshot.get(key)
+    vision_router = snapshot.get("vision_router") or {}
+    if not value:
+        value = vision_router.get(key)
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()] or None
+    return None
+
+
 def _intent_label(intent: str | None) -> str | None:
     if intent == "SCENE_EDIT":
         return "场景重绘"
@@ -104,6 +115,8 @@ def _build_generation_task_slot_response(slot: GenerationTask) -> GenerationTask
         dynamic_lighting_needs=_extract_snapshot_text(slot, "dynamic_lighting_needs"),
         primary_sku_description=_extract_snapshot_text(slot, "primary_sku_description"),
         secondary_props=_extract_snapshot_text(slot, "secondary_props"),
+        dynamic_props=_extract_snapshot_list(slot, "dynamic_props"),
+        camera_perspective=_extract_snapshot_text(slot, "camera_perspective"),
         subject_features=subject_features,
         style_features=style_features,
         background_features=background_features,

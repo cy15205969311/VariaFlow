@@ -21,6 +21,7 @@ SUPPORTED_INTENTS = {INTENT_SCENE_EDIT, INTENT_POSE_VARIATION}
 SUPPORTED_SKU_CATEGORIES = {
     "apparel_flat",
     "apparel_hanging",
+    "apparel_leaning",
     "apparel_invisible_mannequin",
     "shoes_resting",
     "bag_standing",
@@ -51,14 +52,17 @@ SUPPORTED_SCENE_RECIPE_TEXT = ", ".join(SUPPORTED_SCENE_RECIPE_KEYS)
 VISION_SYSTEM_PROMPT = (
     "You are an ecommerce visual routing system. "
     "Analyze the primary subject in the image and classify it into exactly one intent. "
-    "Return only valid JSON with the keys intent, reason, subject_type, sku_category, suggested_scene, suggested_scene_recipe, dynamic_spatial_prompt, dynamic_lighting_prompt, primary_sku_description, secondary_props, subject_features, style_features, and background_features. "
+    "Return only valid JSON with the keys intent, reason, subject_type, sku_category, suggested_scene, suggested_scene_recipe, dynamic_spatial_prompt, dynamic_lighting_prompt, primary_sku_description, secondary_props, dynamic_props, camera_perspective, subject_features, style_features, and background_features. "
     "Use SCENE_EDIT for inanimate products or standard merchandise whose physical shape must stay unchanged. "
     "Use POSE_VARIATION for cartoon IP, mascots, animals, dolls, characters, or people whose pose, expression, styling, or outfit may vary. "
     "subject_type must be exactly one of: human_model, product_only. "
     "Use human_model only when a real human person is visibly present and should be preserved as part of the composition. "
     "Use product_only for all non-human products, IP figures, toys, food, packaged goods, and character merchandise. "
-    "sku_category must be exactly one of: apparel_flat, apparel_hanging, apparel_invisible_mannequin, shoes_resting, bag_standing, accessories_flat, beauty_bottle_standing, beauty_tube_flat, beauty_palette_open, jewelry_macro_display, watch_stand_display, electronic_flat, appliance_standing, furniture_room_setup, home_decor_resting, food_packaged_standing, food_plated, toy_standing, plush_sitting, virtual_ip_character, real_human_model, bottle_standing, box_standing, 3d_toy, other_flat. "
+    "CRITICAL RULE: If there is ANY human body part such as a face, torso, legs, arms, or hands wearing or interacting with the product in the image, the sku_category MUST strictly be classified as real_human_model. Do NOT classify it as flat lay or invisible mannequin if a human is present. "
+    "sku_category must be exactly one of: apparel_flat, apparel_hanging, apparel_leaning, apparel_invisible_mannequin, shoes_resting, bag_standing, accessories_flat, beauty_bottle_standing, beauty_tube_flat, beauty_palette_open, jewelry_macro_display, watch_stand_display, electronic_flat, appliance_standing, furniture_room_setup, home_decor_resting, food_packaged_standing, food_plated, toy_standing, plush_sitting, virtual_ip_character, real_human_model, bottle_standing, box_standing, 3d_toy, other_flat. "
     "Choose sku_category based on the real-world physical placement that best matches the subject. It is a fallback routing hint, not the main creative output. "
+    "Use apparel_leaning when the product is best merchandised leaning against a wall or vertical surface with a visible floor-wall intersection. "
+    "If the desired merchandising mood is lifestyle-led hero imagery for a main apparel SKU, prefer apparel_leaning over apparel_flat when a leaning wall-floor setup would create a more premium commercial result. "
     f"suggested_scene_recipe must be exactly one of these recipe keys: {SUPPORTED_SCENE_RECIPE_TEXT}. "
     "Choose the recipe key that best matches the product's material, mood, target lifestyle, conversion intent, and ecommerce merchandising potential. "
     "For SCENE_EDIT, suggested_scene must mirror suggested_scene_recipe exactly. "
@@ -66,7 +70,14 @@ VISION_SYSTEM_PROMPT = (
     "For SCENE_EDIT, dynamic_spatial_prompt must be a short executable English prompt that explains exactly how the subject should be physically grounded in the new scene, such as how it stands, lays, rests, hangs, or contacts the surface. "
     "For SCENE_EDIT, dynamic_lighting_prompt must be a short executable English prompt that explains the lighting and material treatment needed for the product, such as reflections, caustics, soft fabric light, appetizing warmth, or shadow structure. "
     "For SCENE_EDIT, dynamic_spatial_prompt and dynamic_lighting_prompt must be concrete, production-ready instructions rather than abstract commentary. "
+    "For SCENE_EDIT, dynamic_props must be a JSON array containing zero to two complementary ecommerce styling props that enhance conversion without replacing the product. "
+    "dynamic_props should contain generic commercially useful prop suggestions such as tactile materials, paper goods, ceramic accents, ribbons, stone accents, or editorial lifestyle details, and should avoid overly specific branded objects. "
+    "camera_perspective must be a short English label such as top-down, 45-degree angle, eye-level, or low-angle. "
+    "For apparel_flat, prefer top-down. For apparel_hanging, prefer eye-level. For apparel_leaning, prefer angular side-view such as 30-to-45-degree angle. For shoes_resting, capture the exact low-angle or side angle from the original reference. "
+    "If the subject is shoes or another perspective-sensitive 3D product, camera_perspective must capture the original viewing angle precisely. "
     "For POSE_VARIATION, dynamic_spatial_prompt and dynamic_lighting_prompt should be empty strings. "
+    "For POSE_VARIATION, dynamic_props should be an empty array. "
+    "For POSE_VARIATION, camera_perspective should be an empty string. "
     "primary_sku_description must be a concise English description of the core sellable subject that must remain dominant, such as 'green collared knit sweater' or 'matte black ankle boots'. "
     "secondary_props must be a concise English comma-separated list of non-core accessories, styling props, or supporting items that may be optional, removable, or de-emphasized. "
     "When analyzing a real_human_model image, identify the visually dominant garment or apparel item as primary_sku_description. "
@@ -77,8 +88,8 @@ VISION_SYSTEM_PROMPT = (
     "For POSE_VARIATION, style_features must describe the stable visual style such as 3D toy render, photorealistic studio photo, cel shading, lighting mood, and material rendering. "
     "For POSE_VARIATION, background_features must describe the original background environment, color atmosphere, and scene context. "
     "Do not mention the current pose, gesture, camera angle, background, temporary clothing, props, or temporary accessories unless they are permanent identity traits. "
-    "For SCENE_EDIT, subject_features, style_features, and background_features must all be empty strings, but subject_type, sku_category, suggested_scene, suggested_scene_recipe, dynamic_spatial_prompt, dynamic_lighting_prompt, and primary_sku_description must be filled. "
-    'Example: {"intent":"POSE_VARIATION","reason":"cartoon mascot character with editable pose and outfit","subject_type":"product_only","sku_category":"3d_toy","suggested_scene":"","suggested_scene_recipe":"soft_girly_lifestyle","dynamic_spatial_prompt":"","dynamic_lighting_prompt":"","primary_sku_description":"3D blind-box monkey mascot figure","secondary_props":"yellow jacket, gingerbread prop","subject_features":"3D chibi cartoon monkey, large brown eyes, fluffy light brown fur, big round ears, oversized head-to-body ratio","style_features":"polished 3D blind-box render, soft global illumination, glossy collectible toy finish","background_features":"warm indoor studio backdrop with clean gradient and soft ambient shadows"}'
+    "For SCENE_EDIT, subject_features, style_features, and background_features must all be empty strings, but subject_type, sku_category, suggested_scene, suggested_scene_recipe, dynamic_spatial_prompt, dynamic_lighting_prompt, primary_sku_description, dynamic_props, and camera_perspective must be filled. "
+    'Example: {"intent":"POSE_VARIATION","reason":"cartoon mascot character with editable pose and outfit","subject_type":"product_only","sku_category":"3d_toy","suggested_scene":"","suggested_scene_recipe":"soft_girly_lifestyle","dynamic_spatial_prompt":"","dynamic_lighting_prompt":"","primary_sku_description":"3D blind-box monkey mascot figure","secondary_props":"yellow jacket, gingerbread prop","dynamic_props":[],"camera_perspective":"","subject_features":"3D chibi cartoon monkey, large brown eyes, fluffy light brown fur, big round ears, oversized head-to-body ratio","style_features":"polished 3D blind-box render, soft global illumination, glossy collectible toy finish","background_features":"warm indoor studio backdrop with clean gradient and soft ambient shadows"}'
 )
 
 JSON_OBJECT_PATTERN = re.compile(r"\{.*?\}", re.DOTALL)
@@ -97,6 +108,8 @@ class VisionRouteDecision:
     dynamic_lighting_needs: str = ""
     primary_sku_description: str = ""
     secondary_props: str = ""
+    dynamic_props: list[str] | None = None
+    camera_perspective: str = ""
     subject_features: str = ""
     style_features: str = ""
     background_features: str = ""
@@ -191,6 +204,32 @@ def _normalize_dynamic_prompt_field(value: Any, intent: str) -> str:
     return _normalize_text_field(value)
 
 
+def _normalize_dynamic_props(value: Any, intent: str) -> list[str]:
+    if intent != INTENT_SCENE_EDIT:
+        return []
+    if not isinstance(value, list):
+        return []
+
+    normalized_props: list[str] = []
+    seen: set[str] = set()
+    for item in value:
+        normalized = _normalize_text_field(item)
+        lowered = normalized.lower()
+        if not normalized or lowered in seen:
+            continue
+        seen.add(lowered)
+        normalized_props.append(normalized)
+        if len(normalized_props) >= 2:
+            break
+    return normalized_props
+
+
+def _normalize_camera_perspective(value: Any, intent: str) -> str:
+    if intent != INTENT_SCENE_EDIT:
+        return ""
+    return _normalize_text_field(value)
+
+
 def _image_to_data_url(image_bytes: bytes, source_image_name: str) -> str:
     suffix = Path(source_image_name).suffix.lower()
     mime_type = {
@@ -215,7 +254,7 @@ def _build_payload(image_data_url: str) -> dict[str, Any]:
                         "type": "text",
                         "text": (
                             "Classify this image as SCENE_EDIT or POSE_VARIATION. "
-                            "Return only JSON with intent, reason, subject_type, sku_category, suggested_scene, suggested_scene_recipe, dynamic_spatial_prompt, dynamic_lighting_prompt, primary_sku_description, secondary_props, subject_features, style_features, and background_features."
+                            "Return only JSON with intent, reason, subject_type, sku_category, suggested_scene, suggested_scene_recipe, dynamic_spatial_prompt, dynamic_lighting_prompt, primary_sku_description, secondary_props, dynamic_props, camera_perspective, subject_features, style_features, and background_features."
                         ),
                     },
                     {
@@ -273,6 +312,8 @@ async def analyze_image_intent(
             dynamic_lighting_needs="",
             primary_sku_description="",
             secondary_props="",
+            dynamic_props=[],
+            camera_perspective="",
             subject_features="",
             style_features="",
             background_features="",
@@ -332,6 +373,8 @@ async def analyze_image_intent(
             dynamic_lighting_needs="",
             primary_sku_description="",
             secondary_props="",
+            dynamic_props=[],
+            camera_perspective="",
             subject_features="",
             style_features="",
             background_features="",
@@ -363,6 +406,8 @@ async def analyze_image_intent(
         )
         primary_sku_description = _normalize_text_field(parsed.get("primary_sku_description"))
         secondary_props = _normalize_text_field(parsed.get("secondary_props"))
+        dynamic_props = _normalize_dynamic_props(parsed.get("dynamic_props"), intent)
+        camera_perspective = _normalize_camera_perspective(parsed.get("camera_perspective"), intent)
         subject_features = _normalize_subject_features(parsed.get("subject_features"), intent)
         style_features = _normalize_feature_text(parsed.get("style_features"), intent)
         background_features = _normalize_feature_text(parsed.get("background_features"), intent)
@@ -378,6 +423,8 @@ async def analyze_image_intent(
             dynamic_lighting_needs=dynamic_lighting_needs,
             primary_sku_description=primary_sku_description,
             secondary_props=secondary_props,
+            dynamic_props=dynamic_props,
+            camera_perspective=camera_perspective,
             subject_features=subject_features,
             style_features=style_features,
             background_features=background_features,
@@ -397,6 +444,8 @@ async def analyze_image_intent(
             dynamic_lighting_needs="",
             primary_sku_description="",
             secondary_props="",
+            dynamic_props=[],
+            camera_perspective="",
             subject_features="",
             style_features="",
             background_features="",

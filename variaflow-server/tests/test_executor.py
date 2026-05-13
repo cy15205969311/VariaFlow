@@ -4,6 +4,7 @@ from pathlib import Path
 
 import httpx
 import pytest
+from PIL import Image
 from sqlalchemy import select
 
 from app.gateways import ai_provider
@@ -18,6 +19,15 @@ def _build_http_status_error(status_code: int, url: str, message: str) -> httpx.
     request = httpx.Request("POST", url, json={"mock": True})
     response = httpx.Response(status_code=status_code, request=request, json={"error": message})
     return httpx.HTTPStatusError(message, request=request, response=response)
+
+
+def _build_deterministic_test_image_bytes() -> bytes:
+    from io import BytesIO
+
+    image = Image.new("RGB", (1536, 1536), color=(28, 78, 138))
+    buffer = BytesIO()
+    image.save(buffer, format="PNG", optimize=False, compress_level=0)
+    return buffer.getvalue()
 
 
 def test_resolve_provider_hint_for_real_human_pose_variation_uses_openai_edit() -> None:
@@ -35,11 +45,69 @@ async def test_happy_path(monkeypatch: pytest.MonkeyPatch, mock_batch_data: dict
         source_image_bytes: bytes | None = None,
     ) -> tuple[bytes, dict]:
         del payload_json, source_image_bytes
-        adapter = ai_provider.MockAIAdapter(provider_route)
-        result = await adapter.generate(client=None, payload_json={})
-        return result.image_bytes, result.meta
+        return _build_deterministic_test_image_bytes(), {
+            "provider_code": "pytest_mock_openai_image_edit",
+            "provider_route": provider_route.value,
+            "request_url": f"mock://{provider_route.value}",
+            "http_status": 200,
+            "content_type": "image/png",
+            "mock": True,
+        }
 
     monkeypatch.setattr(ai_provider, "call_ai_provider", _always_success)
+    monkeypatch.setattr("app.services.executor.call_ai_provider", _always_success)
+
+    async def _fake_analyze_image_intent(*, image_bytes: bytes, source_image_name: str):
+        del image_bytes, source_image_name
+        from app.services.vision_router import VisionRouteDecision
+
+        return VisionRouteDecision(
+            intent="SCENE_EDIT",
+            reason="pytest_happy_path",
+            raw_text='{"intent":"SCENE_EDIT"}',
+            subject_type="product_only",
+            sku_category="apparel_flat",
+            suggested_scene="clean_fit_minimal",
+            suggested_scene_recipe="clean_fit_minimal",
+            dynamic_spatial_anchor="Placed naturally on a clean surface with realistic fabric volume and grounded folds.",
+            dynamic_lighting_needs="Use soft commercial daylight with clean shadows and visible textile texture.",
+            primary_sku_description="white hoodie",
+            secondary_props="",
+            dynamic_props=[],
+            camera_perspective="top-down",
+        )
+
+    def _fake_prepare_scene_edit_source_image(
+        image_path,
+        temp_root,
+        *,
+        sku_category,
+        subject_type,
+        suggested_scene,
+        target_size,
+    ):
+        assert sku_category == "apparel_flat"
+        assert subject_type == "product_only"
+        assert suggested_scene == "clean_fit_minimal"
+        assert target_size == "1024x1024"
+        source_path = Path(image_path)
+        generated_path = Path(temp_root) / "happy_path_source.png"
+        generated_path.parent.mkdir(parents=True, exist_ok=True)
+        generated_path.write_bytes(source_path.read_bytes())
+        from app.utils.image_processor import PreparedSceneEditImage
+
+        return PreparedSceneEditImage(
+            path=generated_path,
+            background_removed=False,
+            canvas_padded=True,
+            anchor="center",
+            canvas_size=(1024, 1024),
+            subject_bbox=(128, 160, 896, 864),
+            scale_ratio=0.65,
+        )
+
+    monkeypatch.setattr("app.services.executor.analyze_image_intent", _fake_analyze_image_intent)
+    monkeypatch.setattr("app.services.executor.prepare_scene_edit_source_image", _fake_prepare_scene_edit_source_image)
 
     async with session_factory() as session:
         locked = await fetch_and_lock_next_generation_task(
@@ -213,6 +281,8 @@ async def test_scene_edit_uses_transparent_preprocessing_for_openai_edit(
             dynamic_lighting_needs="Use cozy warm editorial lighting with soft window highlights and gentle fabric shadow transitions.",
             primary_sku_description="white oversized hoodie",
             secondary_props="beige scarf, coffee mug",
+            dynamic_props=["soft knit textile accent", "warm ceramic accent"],
+            camera_perspective="top-down",
         )
 
     def _fake_prepare_scene_edit_source_image(
@@ -246,6 +316,7 @@ async def test_scene_edit_uses_transparent_preprocessing_for_openai_edit(
         )
 
     monkeypatch.setattr(ai_provider, "call_ai_provider", _always_success)
+    monkeypatch.setattr("app.services.executor.call_ai_provider", _always_success)
     monkeypatch.setattr("app.services.executor.analyze_image_intent", _fake_analyze_image_intent)
     monkeypatch.setattr("app.services.executor.prepare_scene_edit_source_image", _fake_prepare_scene_edit_source_image)
 
@@ -268,6 +339,8 @@ async def test_scene_edit_uses_transparent_preprocessing_for_openai_edit(
     assert captured_payloads[0]["dynamic_lighting_needs"] == "Use cozy warm editorial lighting with soft window highlights and gentle fabric shadow transitions."
     assert captured_payloads[0]["primary_sku_description"] == "white oversized hoodie"
     assert captured_payloads[0]["secondary_props"] == "beige scarf, coffee mug"
+    assert captured_payloads[0]["dynamic_props"] == ["soft knit textile accent", "warm ceramic accent"]
+    assert captured_payloads[0]["camera_perspective"] == "top-down"
     assert captured_payloads[0]["source_image_preprocessed"] is True
     assert captured_payloads[0]["source_image_background_removed"] is True
     assert captured_payloads[0]["source_image_canvas_padded"] is True
@@ -316,6 +389,8 @@ async def test_scene_edit_real_human_model_passes_background_mask_to_openai_edit
             dynamic_lighting_needs="Use premium editorial daylight with realistic skin tone rendering and clean garment detail.",
             primary_sku_description="structured cream trench coat",
             secondary_props="oversized sunglasses, leather shoulder bag",
+            dynamic_props=["linen editorial card"],
+            camera_perspective="eye-level",
         )
 
     def _fake_prepare_scene_edit_source_image(
@@ -353,6 +428,7 @@ async def test_scene_edit_real_human_model_passes_background_mask_to_openai_edit
         )
 
     monkeypatch.setattr(ai_provider, "call_ai_provider", _always_success)
+    monkeypatch.setattr("app.services.executor.call_ai_provider", _always_success)
     monkeypatch.setattr("app.services.executor.analyze_image_intent", _fake_analyze_image_intent)
     monkeypatch.setattr("app.services.executor.prepare_scene_edit_source_image", _fake_prepare_scene_edit_source_image)
 
@@ -371,6 +447,8 @@ async def test_scene_edit_real_human_model_passes_background_mask_to_openai_edit
     assert captured_payloads[0]["source_image_mask_generated"] is True
     assert captured_payloads[0]["source_image_canvas_padded"] is False
     assert captured_payloads[0]["source_image_mask_name"] == "human_mask.png"
+    assert captured_payloads[0]["dynamic_props"] == ["linen editorial card"]
+    assert captured_payloads[0]["camera_perspective"] == "eye-level"
     assert isinstance(captured_payloads[0]["mask_image_bytes"], bytes)
     assert captured_payloads[0]["mask_image_name"] == "human_mask.png"
     assert "source" in generated_paths

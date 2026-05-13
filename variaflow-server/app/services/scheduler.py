@@ -44,7 +44,7 @@ async def fetch_and_lock_next_generation_task(
         .where(BatchJob.status == BatchStatus.RUNNING)
         .where(GenerationTask.status.in_([TaskStatus.PENDING, TaskStatus.RETRYING]))
         .where(or_(GenerationTask.next_run_at.is_(None), GenerationTask.next_run_at <= now))
-        .order_by(GenerationTask.id.asc())
+        .order_by(BatchJob.created_at.desc(), GenerationTask.id.asc())
         .limit(1)
     )
     if settings.db_supports_skip_locked:

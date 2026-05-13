@@ -4,6 +4,16 @@ import random
 from typing import Any
 
 from app.core.config import settings
+from app.core.knowledge_engine import (
+    DEFAULT_PHYSICAL_CONSTRAINT,
+    build_camera_perspective_sentence,
+    build_camera_perspective_constraint,
+    filter_dynamic_props,
+    get_category_constraint,
+    get_negative_prompt_lock,
+    get_perspective_lock,
+    get_prompt_prefix,
+)
 from app.core.prompt_lexicon import (
     CAMERA_TERMS,
     ENVIRONMENT_TEMPLATES,
@@ -11,6 +21,7 @@ from app.core.prompt_lexicon import (
     NEGATIVE_SPACE_COMPOSITION_RULE,
     QUALITY_TERMS,
     RENDER_TERMS,
+    SCENE_PROP_SUGGESTIONS,
     SCENE_RECIPE_FALLBACKS,
     SCENE_RECIPES,
 )
@@ -95,6 +106,24 @@ def _normalize_accessory_text(raw: str | None) -> str:
     return _normalize_scene_text(raw)
 
 
+def _normalize_dynamic_prop_list(raw: Any) -> list[str]:
+    if raw is None or not isinstance(raw, list):
+        return []
+
+    normalized_props: list[str] = []
+    seen: set[str] = set()
+    for item in raw:
+        normalized = _normalize_scene_text(str(item))
+        lowered = normalized.lower()
+        if not normalized or lowered in seen:
+            continue
+        seen.add(lowered)
+        normalized_props.append(normalized)
+        if len(normalized_props) >= 2:
+            break
+    return normalized_props
+
+
 def _is_food_category(sku_category: str | None) -> bool:
     return "food" in str(sku_category or "").strip().lower()
 
@@ -137,6 +166,7 @@ def _fallback_spatial_anchor_for_sku(sku_category: str) -> str:
     fallback_map = {
         "real_human_model": "Presented by a real human model with natural body grounding, full-body continuity, and realistic contact with the environment.",
         "apparel_hanging": "Hanging naturally with realistic vertical fabric drape and clear top support alignment.",
+        "apparel_leaning": "Leaning naturally against a vertical wall with a visible wall-floor intersection, realistic gravity, and grounded contact shadow.",
         "food_packaged_standing": "Standing upright on a stable surface with crisp grounded contact shadows and appetizing packaging presentation.",
         "food_plated": "Laying naturally on a plate or serving surface with believable food placement and grounded contact.",
         "shoes_resting": "Placed firmly on the ground at realistic 1:1 scale with strong contact shadows and no oversized environment distortion.",
@@ -337,7 +367,11 @@ def _build_scene_edit_prompt(
     dynamic_lighting_needs: str | None = None,
     primary_sku_description: str | None = None,
     secondary_props: str | None = None,
+    dynamic_props: list[str] | None = None,
+    subject_type: str | None = None,
+    camera_perspective: str | None = None,
 ) -> str:
+    perspective_sentence = build_camera_perspective_sentence(camera_perspective, sku_category)
     grounding_prompt = (
         _normalize_scene_text(dynamic_spatial_anchor)
         if _has_executable_dynamic_prompt(dynamic_spatial_anchor)
@@ -352,20 +386,53 @@ def _build_scene_edit_prompt(
         "the core sellable product"
     )
     secondary_clause = secondary_props.strip() if secondary_props and secondary_props.strip() else "secondary styling props"
+    normalized_dynamic_props = filter_dynamic_props(
+        dynamic_props=_normalize_dynamic_prop_list(dynamic_props),
+        sku_category=sku_category,
+        primary_sku_description=primary_sku_description,
+    )
+    props_instruction = ""
+    if normalized_dynamic_props:
+        props_instruction = (
+            "Aesthetically integrate the following complementary props into the scene: "
+            f"{', '.join(normalized_dynamic_props)}."
+        )
+    normalized_subject_type = str(subject_type or "").strip().lower()
+    secondary_policy = (
+        f"Secondary elements like [{secondary_clause}] should be preserved if they belong to a human model."
+        if normalized_subject_type == "human_model"
+        else f"Secondary elements like [{secondary_clause}] may be adapted naturally if they are not core to the sale."
+    )
+    category_constraint = get_category_constraint(sku_category) or DEFAULT_PHYSICAL_CONSTRAINT
+    perspective_constraint = build_camera_perspective_constraint(camera_perspective, sku_category)
+    special_lock = get_perspective_lock(sku_category)
+    negative_lock = get_negative_prompt_lock(sku_category)
+    prompt_prefix = get_prompt_prefix(sku_category)
+    if normalized_subject_type == "human_model" or sku_category == "real_human_model":
+        props_instruction = ""
+
     base_prompt = (
         positive_template
         .replace("{{identity_lock}}", identity_lock)
         .replace("{{variant_directive}}", scene_variant_directive)
     )
-    return ", ".join(
+    return "\n".join(
         fragment
         for fragment in [
-            f"CRITICAL GROUNDING: {grounding_prompt}.",
-            f"MATERIAL & LIGHTING SYNC: {lighting_prompt}.",
-            f"VIRAL SCENE RECIPE: {scene_recipe_key}.",
-            f"ENVIRONMENT & BACKGROUND: {scene_environment}.",
-            f"CRITICAL IDENTITY LOCK: You MUST preserve the exact design, texture, and color of the primary subject: [{primary_clause}]. The secondary accessories like [{secondary_clause}] are OPTIONAL and can be removed or altered naturally.",
+            perspective_sentence,
+            prompt_prefix,
+            f"CRITICAL IDENTITY LOCK: You MUST preserve the exact design, shape, texture, and color of the primary subject: [{primary_clause}].",
+            secondary_policy,
+            f"KNOWLEDGE GRAPH CONSTRAINT: {category_constraint}",
+            special_lock,
+            perspective_constraint,
+            f"NEGATIVE PROMPT LOCK: {negative_lock}" if negative_lock else "",
+            f"SPATIAL GROUNDING: {grounding_prompt}.",
+            f"ENVIRONMENT & VIBE: {scene_environment}.",
+            f"LIGHTING & MATERIAL: {lighting_prompt}.",
+            props_instruction,
             "Ensure realistic drop shadows, believable surface contact, and seamless commercial integration.",
+            "Ensure an elegant, high-end e-commerce commercial photography aesthetic with sufficient negative space for typography.",
             NEGATIVE_SPACE_COMPOSITION_RULE,
             base_prompt,
             fragments["camera_fragment"],
@@ -471,6 +538,38 @@ def _resolve_scene_supporting_environment(
     return options[seed_value % len(options)]
 
 
+def _resolve_dynamic_props(
+    *,
+    dynamic_props: list[str] | None,
+    scene_recipe_key: str,
+    sku_category: str,
+    source_task: SourceTask,
+    generation_task: GenerationTask,
+) -> list[str]:
+    normalized = _normalize_dynamic_prop_list(dynamic_props)
+    if normalized:
+        return normalized
+
+    pool = SCENE_PROP_SUGGESTIONS.get(scene_recipe_key, [])
+    if not pool:
+        fallback_keys = SCENE_RECIPE_FALLBACKS.get(sku_category, ["clean_fit_minimal"])
+        for fallback_key in fallback_keys:
+            pool = SCENE_PROP_SUGGESTIONS.get(fallback_key, [])
+            if pool:
+                break
+    if not pool:
+        return []
+
+    seed_value = generation_task.variant_index + sum(ord(char) for char in (source_task.source_hash or ""))
+    first = pool[seed_value % len(pool)]
+    if len(pool) == 1:
+        return [first]
+    second = pool[(seed_value + 1) % len(pool)]
+    if first == second:
+        return [first]
+    return [first, second]
+
+
 def build_provider_payload(
     source_task: SourceTask,
     generation_task: GenerationTask,
@@ -488,6 +587,9 @@ def build_provider_payload(
     suggested_scene_recipe: str | None = None,
     dynamic_spatial_anchor: str | None = None,
     dynamic_lighting_needs: str | None = None,
+    dynamic_props: list[str] | None = None,
+    subject_type: str | None = None,
+    camera_perspective: str | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """
     组装发往模型网关的标准化载荷，并同时返回一份可落库审计的快照。
@@ -555,6 +657,18 @@ def build_provider_payload(
     resolved_scene_environment = (
         f"{resolved_scene_recipe} Supporting surface and lighting continuity: {resolved_supporting_environment}"
     )
+    resolved_dynamic_props = _resolve_dynamic_props(
+        dynamic_props=dynamic_props,
+        scene_recipe_key=resolved_scene_recipe_key,
+        sku_category=normalized_sku_category,
+        source_task=source_task,
+        generation_task=generation_task,
+    )
+    resolved_dynamic_props = filter_dynamic_props(
+        dynamic_props=resolved_dynamic_props,
+        sku_category=normalized_sku_category,
+        primary_sku_description=normalized_primary_sku_description,
+    )
     scene_variant_directive = f"in the following background environment: {resolved_scene_environment}"
     if normalized_intent == "POSE_VARIATION" and normalized_sku_category == "real_human_model":
         final_prompt = _build_real_human_pose_edit_prompt(
@@ -595,6 +709,9 @@ def build_provider_payload(
             dynamic_lighting_needs=dynamic_lighting_needs,
             primary_sku_description=normalized_primary_sku_description,
             secondary_props=normalized_secondary_props,
+            dynamic_props=resolved_dynamic_props,
+            subject_type=subject_type,
+            camera_perspective=camera_perspective,
         )
 
     prompt_snapshot = {
@@ -608,6 +725,8 @@ def build_provider_payload(
         "dynamic_lighting_needs": _normalize_scene_text(dynamic_lighting_needs) if normalized_intent == "SCENE_EDIT" else "",
         "primary_sku_description": normalized_primary_sku_description,
         "secondary_props": normalized_secondary_props,
+        "dynamic_props": resolved_dynamic_props if normalized_intent == "SCENE_EDIT" else [],
+        "camera_perspective": _normalize_scene_text(camera_perspective) if normalized_intent == "SCENE_EDIT" else "",
         "subject_features": subject_features if normalized_intent == "POSE_VARIATION" else "",
         "style_features": style_features if normalized_intent == "POSE_VARIATION" else "",
         "background_features": background_features if normalized_intent == "POSE_VARIATION" else "",
@@ -636,6 +755,8 @@ def build_provider_payload(
         "dynamic_lighting_needs": _normalize_scene_text(dynamic_lighting_needs) if normalized_intent == "SCENE_EDIT" else "",
         "primary_sku_description": normalized_primary_sku_description,
         "secondary_props": normalized_secondary_props,
+        "dynamic_props": resolved_dynamic_props if normalized_intent == "SCENE_EDIT" else [],
+        "camera_perspective": _normalize_scene_text(camera_perspective) if normalized_intent == "SCENE_EDIT" else "",
         "subject_features": subject_features if normalized_intent == "POSE_VARIATION" else "",
         "style_features": style_features if normalized_intent == "POSE_VARIATION" else "",
         "background_features": background_features if normalized_intent == "POSE_VARIATION" else "",
