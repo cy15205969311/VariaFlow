@@ -21,6 +21,11 @@ class BatchResponse(BaseModel):
     failed_source_count: int
     success_generation_count: int
     failed_generation_count: int
+    processing_generation_count: int
+    terminal_generation_count: int
+    progress_percent: float
+    download_ready: bool
+    export_status: str
     estimated_remaining_seconds: int | None = Field(default=None)
     created_at: datetime
     updated_at: datetime

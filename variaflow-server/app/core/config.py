@@ -146,6 +146,14 @@ def _get_app_env() -> str:
     return _get_env("VARIAFLOW_APP_ENV", "development") or "development"
 
 
+def _get_async_execution_mode() -> str:
+    default_mode = "inline" if _is_test_runtime() else "celery"
+    raw_mode = (_get_env("VARIAFLOW_ASYNC_EXECUTION_MODE", default_mode) or default_mode).strip().lower()
+    if raw_mode not in {"inline", "celery"}:
+        return default_mode
+    return raw_mode
+
+
 def _is_test_runtime() -> bool:
     app_env = _get_app_env().strip().lower()
     return (
@@ -298,6 +306,13 @@ class Settings:
     worker_name: str = os.getenv("VARIAFLOW_WORKER_NAME", "variaflow-worker-1")
     scheduler_max_inflight_tasks: int = _get_int("VARIAFLOW_SCHEDULER_MAX_INFLIGHT_TASKS", 1)
     db_supports_skip_locked: bool = _get_bool("VARIAFLOW_DB_SUPPORTS_SKIP_LOCKED", False)
+    async_execution_mode: str = field(default_factory=_get_async_execution_mode)
+    redis_url: str = _get_env("VARIAFLOW_REDIS_URL", "redis://127.0.0.1:6379/0") or "redis://127.0.0.1:6379/0"
+    celery_broker_url: str = _get_env("VARIAFLOW_CELERY_BROKER_URL", aliases=("VARIAFLOW_REDIS_URL",)) or "redis://127.0.0.1:6379/0"
+    celery_result_backend: str = _get_env("VARIAFLOW_CELERY_RESULT_BACKEND", aliases=("VARIAFLOW_REDIS_URL",)) or "redis://127.0.0.1:6379/0"
+    celery_task_time_limit_seconds: int = _get_int("VARIAFLOW_CELERY_TASK_TIME_LIMIT_SECONDS", 900)
+    celery_task_soft_time_limit_seconds: int = _get_int("VARIAFLOW_CELERY_TASK_SOFT_TIME_LIMIT_SECONDS", 840)
+    export_temp_root: Path = Path(os.getenv("VARIAFLOW_EXPORT_TEMP_ROOT", "data/_exports")).resolve()
     provider_debug_log: bool = _get_bool("VARIAFLOW_PROVIDER_DEBUG_LOG", False)
     provider_request_timeout_seconds: float = float(
         os.getenv("VARIAFLOW_PROVIDER_REQUEST_TIMEOUT_SECONDS", "90")

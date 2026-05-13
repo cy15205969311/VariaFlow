@@ -6,7 +6,7 @@ import { getTasks } from "@/api/task";
 
 const POLLING_INTERVAL = 3000;
 const FETCH_PAGE_SIZE = 200;
-const TERMINAL_BATCH_STATUSES = new Set(["completed", "failed"]);
+const TERMINAL_BATCH_STATUSES = new Set(["completed", "failed", "partial_success"]);
 
 function mergeGenerationTasks(previousSlots = [], nextSlots = []) {
   const previousMap = new Map(previousSlots.map((slot) => [slot.id, slot]));

@@ -149,7 +149,7 @@ async function handleCustomUpload(options) {
       throw new Error("上传接口返回的数据结构不完整，缺少 batch.id");
     }
 
-    ElMessage.success(`上传成功，批次 #${batch.id} 已创建`);
+    ElMessage.success(`批次 #${batch.id} 已接收，后台开始异步处理`);
     selectedFile.value = null;
     uploadProgress.value = 100;
     uploadRef.value?.clearFiles?.();
