@@ -103,6 +103,7 @@ def test_build_provider_payload_injects_grounding_prompt_for_scene_edit() -> Non
         intent="SCENE_EDIT",
         intent_reason="standard_product",
         sku_category="bottle_standing",
+        material_type="reflective_glass",
         suggested_scene="natural_skincare_luxury",
         suggested_scene_recipe="natural_skincare_luxury",
         dynamic_spatial_anchor="Standing upright on a solid stone surface with crisp contact shadow directly beneath the base.",
@@ -114,6 +115,7 @@ def test_build_provider_payload_injects_grounding_prompt_for_scene_edit() -> Non
 
     assert payload["provider_hint"] == "openai_image_edit"
     assert payload["sku_category"] == "bottle_standing"
+    assert payload["material_type"] == "reflective_glass"
     assert payload["suggested_scene"] == "natural_skincare_luxury"
     assert payload["suggested_scene_recipe"] == "natural_skincare_luxury"
     assert payload["dynamic_spatial_anchor"] == "Standing upright on a solid stone surface with crisp contact shadow directly beneath the base."
@@ -122,6 +124,7 @@ def test_build_provider_payload_injects_grounding_prompt_for_scene_edit() -> Non
     assert payload["secondary_props"] == "folded towel, glass dropper"
     assert payload["dynamic_props"] == ["glass accent", "folded spa textile"]
     assert snapshot["sku_category"] == "bottle_standing"
+    assert snapshot["material_type"] == "reflective_glass"
     assert snapshot["suggested_scene"] == "natural_skincare_luxury"
     assert snapshot["suggested_scene_recipe"] == "natural_skincare_luxury"
     assert snapshot["dynamic_spatial_anchor"] == "Standing upright on a solid stone surface with crisp contact shadow directly beneath the base."
@@ -518,10 +521,156 @@ def test_build_provider_payload_injects_leaning_prefix_and_domain_props() -> Non
 
     assert payload["camera_perspective"] == "30-to-45-degree angle"
     assert snapshot["camera_perspective"] == "30-to-45-degree angle"
-    assert "Shot from a consistent 30-to-45-degree angle perspective." in payload["prompt"]
-    assert "A composition featuring a clean 90-degree intersection of a vertical minimalist wall and a horizontal solid floor. The apparel is leaning naturally against the wall." in payload["prompt"]
-    assert "Must generate a clear 90-degree intersection between a vertical wall and a horizontal floor." in payload["prompt"]
+    assert "A composition featuring a clean 90-degree intersection of a vertical minimalist wall and a horizontal solid floor. The apparel is leaning naturally against the wall." not in payload["prompt"]
+    assert "Must generate a clear 90-degree intersection between a vertical wall and a horizontal floor." not in payload["prompt"]
+    assert "Must preserve realistic fabric folds, grounded wrinkles, and tight contact shadows directly around the garment edges." in payload["prompt"]
     assert "Aesthetically integrate the following complementary props into the scene:" in payload["prompt"]
+
+
+def test_build_provider_payload_blocks_soft_apparel_leaning_and_falls_back_to_flat_logic() -> None:
+    batch = SimpleNamespace(batch_code="batch-008b")
+    source_task = SimpleNamespace(
+        source_name="S0010_src_mock.png",
+        source_ext="png",
+        source_path="E:/tmp/S0010_src_mock.png",
+        identity_profile_json={"identity_lock": "Keep the same subject identity."},
+        batch=batch,
+        id=10,
+        source_hash="soft-apparel-lock-001",
+    )
+    generation_task = SimpleNamespace(
+        id=110,
+        variant_index=1,
+        variant_axis=SimpleNamespace(value="scene"),
+    )
+
+    payload, snapshot = build_provider_payload(
+        source_task,
+        generation_task,
+        intent="SCENE_EDIT",
+        sku_category="apparel_leaning",
+        material_type="fabric_soft",
+        suggested_scene="old_money_vintage",
+        suggested_scene_recipe="old_money_vintage",
+        dynamic_spatial_anchor="",
+        dynamic_lighting_needs="",
+        primary_sku_description="heavy vintage green knit sweater",
+        secondary_props="none",
+        dynamic_props=[],
+        camera_perspective="",
+    )
+
+    assert snapshot["sku_category"] == "apparel_leaning"
+    assert snapshot["material_type"] == "fabric_soft"
+    assert "A composition featuring a clean 90-degree intersection of a vertical minimalist wall and a horizontal solid floor." not in payload["prompt"]
+    assert "Must preserve realistic fabric folds, grounded wrinkles, and tight contact shadows directly around the garment edges." in payload["prompt"]
+    assert "Shot from a consistent top-down perspective." in payload["prompt"]
+    assert "Laid perfectly flat on the surface with natural gravity-driven fabric folds." in payload["prompt"]
+
+
+def test_build_provider_payload_material_rule_preprends_existing_dynamic_lighting() -> None:
+    batch = SimpleNamespace(batch_code="batch-008c")
+    source_task = SimpleNamespace(
+        source_name="S0010_src_mock.png",
+        source_ext="png",
+        source_path="E:/tmp/S0010_src_mock.png",
+        identity_profile_json={"identity_lock": "Keep the same subject identity."},
+        batch=batch,
+        id=100,
+        source_hash="material-lock-001",
+    )
+    generation_task = SimpleNamespace(
+        id=210,
+        variant_index=1,
+        variant_axis=SimpleNamespace(value="scene"),
+    )
+
+    payload, snapshot = build_provider_payload(
+        source_task,
+        generation_task,
+        intent="SCENE_EDIT",
+        sku_category="bag_standing",
+        material_type="leather_or_pu",
+        suggested_scene="french_street_vibe",
+        suggested_scene_recipe="french_street_vibe",
+        dynamic_spatial_anchor="Keep the bag standing naturally with realistic base support.",
+        dynamic_lighting_needs="Use premium side lighting with refined edge separation.",
+        primary_sku_description="structured leather tote bag",
+        secondary_props="none",
+    )
+
+    assert snapshot["material_type"] == "leather_or_pu"
+    assert payload["material_type"] == "leather_or_pu"
+    assert "Subtle specular highlights to showcase leather grain and premium material finish." in payload["prompt"]
+    assert "Use premium side lighting with refined edge separation." in payload["prompt"]
+
+
+def test_build_provider_payload_adds_knit_material_lighting_hint() -> None:
+    batch = SimpleNamespace(batch_code="batch-010")
+    source_task = SimpleNamespace(
+        source_name="S0011_src_mock.png",
+        source_ext="png",
+        source_path="E:/tmp/S0011_src_mock.png",
+        identity_profile_json={"identity_lock": "Keep the same subject identity."},
+        batch=batch,
+        id=11,
+        source_hash="knit-lighting-001",
+    )
+    generation_task = SimpleNamespace(
+        id=111,
+        variant_index=1,
+        variant_axis=SimpleNamespace(value="scene"),
+    )
+
+    payload, _ = build_provider_payload(
+        source_task,
+        generation_task,
+        intent="SCENE_EDIT",
+        sku_category="apparel_flat",
+        suggested_scene="cozy_winter_morning",
+        suggested_scene_recipe="cozy_winter_morning",
+        dynamic_spatial_anchor="Laid naturally on a clean textile surface with realistic fabric folds.",
+        dynamic_lighting_needs="",
+        primary_sku_description="chunky wool knit sweater",
+        secondary_props="none",
+    )
+
+    assert "soft diffused light" in payload["prompt"].lower()
+    assert "visible knit depth" in payload["prompt"].lower()
+
+
+def test_build_provider_payload_adds_glass_material_lighting_hint() -> None:
+    batch = SimpleNamespace(batch_code="batch-011")
+    source_task = SimpleNamespace(
+        source_name="S0012_src_mock.png",
+        source_ext="png",
+        source_path="E:/tmp/S0012_src_mock.png",
+        identity_profile_json={"identity_lock": "Keep the same subject identity."},
+        batch=batch,
+        id=12,
+        source_hash="glass-lighting-001",
+    )
+    generation_task = SimpleNamespace(
+        id=112,
+        variant_index=1,
+        variant_axis=SimpleNamespace(value="scene"),
+    )
+
+    payload, _ = build_provider_payload(
+        source_task,
+        generation_task,
+        intent="SCENE_EDIT",
+        sku_category="beauty_bottle_standing",
+        suggested_scene="natural_skincare_luxury",
+        suggested_scene_recipe="natural_skincare_luxury",
+        dynamic_spatial_anchor="Standing upright on a premium display surface with crisp base contact shadow.",
+        dynamic_lighting_needs="",
+        primary_sku_description="glass serum bottle",
+        secondary_props="none",
+    )
+
+    assert "caustic light reflections" in payload["prompt"].lower()
+    assert "crisp mirror reflections" in payload["prompt"].lower()
 
 
 def test_build_provider_payload_filters_watch_for_non_business_sku() -> None:

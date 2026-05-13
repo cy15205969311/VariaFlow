@@ -11,12 +11,14 @@ from app.services.vision_router import (
     _normalize_feature_text,
     _normalize_intent,
     _normalize_dynamic_prompt_field,
+    _normalize_material_type,
     _normalize_scene_recipe_key,
     _normalize_suggested_scene,
     _normalize_subject_type,
     _normalize_sku_category,
     _normalize_subject_features,
     _normalize_camera_perspective,
+    _normalize_soft_apparel_routing,
 )
 
 
@@ -81,6 +83,38 @@ def test_normalize_camera_perspective_only_keeps_scene_edit_values() -> None:
     assert _normalize_camera_perspective("top-down", INTENT_POSE_VARIATION) == ""
 
 
+def test_normalize_material_type_resolves_supported_or_inferred_value() -> None:
+    assert _normalize_material_type(" fabric_soft ", INTENT_SCENE_EDIT, "wool knit sweater", "apparel_flat") == "fabric_soft"
+    assert _normalize_material_type("", INTENT_SCENE_EDIT, "glass serum bottle", "beauty_bottle_standing") == "reflective_glass"
+    assert _normalize_material_type("", INTENT_SCENE_EDIT, "structured leather tote bag", "bag_standing") == "leather_or_pu"
+
+
+def test_normalize_soft_apparel_routing_blocks_leaning_for_soft_garment() -> None:
+    sku_category, dynamic_spatial_anchor, camera_perspective = _normalize_soft_apparel_routing(
+        sku_category="apparel_leaning",
+        primary_sku_description="green collared knit sweater",
+        dynamic_spatial_anchor="Leaning naturally against a wall with realistic gravity.",
+        camera_perspective="30-to-45-degree angle",
+    )
+
+    assert sku_category == "apparel_flat"
+    assert "Laid naturally on a flat surface" in dynamic_spatial_anchor
+    assert camera_perspective == "top-down"
+
+
+def test_normalize_soft_apparel_routing_can_redirect_to_hanging_when_anchor_requires_it() -> None:
+    sku_category, dynamic_spatial_anchor, camera_perspective = _normalize_soft_apparel_routing(
+        sku_category="apparel_leaning",
+        primary_sku_description="oversized fleece hoodie",
+        dynamic_spatial_anchor="Hanging vertically with a hanger and soft fabric drape.",
+        camera_perspective="30-to-45-degree angle",
+    )
+
+    assert sku_category == "apparel_hanging"
+    assert "Hanging naturally with realistic vertical fabric drape" in dynamic_spatial_anchor
+    assert camera_perspective == "eye-level"
+
+
 def test_normalize_subject_type_falls_back_from_sku() -> None:
     assert _normalize_subject_type("human_model") == "human_model"
     assert _normalize_subject_type("product_only") == "product_only"
@@ -117,11 +151,13 @@ def test_vision_system_prompt_excludes_temporary_clothing_and_props() -> None:
     assert "primary_sku_description" in VISION_SYSTEM_PROMPT
     assert "secondary_props" in VISION_SYSTEM_PROMPT
     assert "dynamic_props" in VISION_SYSTEM_PROMPT
+    assert "material_type" in VISION_SYSTEM_PROMPT
     assert "camera_perspective" in VISION_SYSTEM_PROMPT
     assert "When analyzing a real_human_model image" in VISION_SYSTEM_PROMPT
     assert "CRITICAL RULE: If there is ANY human body part" in VISION_SYSTEM_PROMPT
-    assert "Use apparel_leaning when the product is best merchandised leaning against a wall" in VISION_SYSTEM_PROMPT
-    assert "prefer apparel_leaning over apparel_flat" in VISION_SYSTEM_PROMPT
+    assert "Use apparel_leaning only for rigid or structured fashion subjects that can physically lean" in VISION_SYSTEM_PROMPT
+    assert "soft single-garment apparel such as sweaters, hoodies, shirts, knitwear, fleece, dresses, pants, or other gravity-sensitive clothing MUST NOT be classified as apparel_leaning" in VISION_SYSTEM_PROMPT
+    assert "CRITICAL PHYSICS CHECK: Soft clothing items" in VISION_SYSTEM_PROMPT
     assert "For apparel_flat, prefer top-down. For apparel_hanging, prefer eye-level." in VISION_SYSTEM_PROMPT
     for category in SUPPORTED_SKU_CATEGORIES:
         assert category in VISION_SYSTEM_PROMPT

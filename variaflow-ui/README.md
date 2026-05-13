@@ -88,3 +88,24 @@ npm run build
 - 上传成功但结果不更新时，先看浏览器 `Console`
 - 如果批次已经创建但任务长时间不动，优先检查后端调度器是否在消费最新批次
 - 如果接口返回成功但页面没有切换，先确认上传返回结构里是否包含 `batch.id`
+
+## 最新补充
+
+### 大图预览体验升级
+
+- Dashboard 卡片中的原图与生成结果图都支持点击预览
+- 预览层使用毛玻璃遮罩、`Teleport` 挂载到 `body`
+- 预览画框固定为 `80vmin` 正方形，解决不同图片预览大小不统一的问题
+- 支持 Esc 关闭、点击遮罩关闭、透明图白底承载
+
+### 新增任务透传字段
+
+`GET /api/v1/tasks` 现在还会返回：
+
+- `material_type`
+- `camera_perspective`
+- `dynamic_spatial_anchor`
+- `dynamic_lighting_needs`
+- `primary_sku_description`
+- `secondary_props`
+- `dynamic_props`

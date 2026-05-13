@@ -85,3 +85,12 @@ pytest
 - 测试库连接是否正常
 - 本地数据目录是否可写
 - 是否有并发测试在清理表结构
+
+## 最新补充
+
+### 本轮新增回归覆盖
+
+- `vision_router`：`material_type` 归一化与软服饰 `leaning` 纠偏
+- `prompt_builder`：材质光影规则注入、软服饰互斥锁 warning 兜底
+- `executor`：`material_type` 透传到 payload、snapshot 与任务接口响应
+- Dashboard 预览改动已通过 `npm run build` 构建校验

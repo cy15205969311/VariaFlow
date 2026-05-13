@@ -42,6 +42,7 @@
 - `reason`
 - `subject_type`
 - `sku_category`
+- `material_type`
 - `primary_sku_description`
 - `secondary_props`
 - `dynamic_props`
@@ -53,6 +54,12 @@
 - `subject_features`
 - `style_features`
 - `background_features`
+
+本轮新增的物理互斥与材质认知：
+
+- `material_type` 统一收敛到 `fabric_soft / fabric_stiff / reflective_glass / leather_or_pu / matte_solid`
+- 软性服饰命中 `fabric_soft` 时，禁止走 `apparel_leaning`
+- `prompt_builder` 会在最终 Prompt 阶段再次兜底，防止前端或模型误传错误姿态
 
 关键规则：
 
@@ -74,15 +81,20 @@
 
 1. 读取视觉模型输出的动态物理与光影字段
 2. 根据 `sku_category` 注入领域约束
-3. 根据 `camera_perspective` 注入视角对齐语句
-4. 根据 `primary_sku_description` / `dynamic_props` 过滤不合理 props
-5. 对真人模特追加严格负向锁
+3. 根据 `material_type` 注入材质专属光影规则
+4. 根据 `camera_perspective` 注入视角对齐语句
+5. 若触发“软服饰 + leaning”互斥锁，则强制降级为 `apparel_flat` 并写入 warning 日志
+6. 根据 `primary_sku_description` / `dynamic_props` 过滤不合理 props
+7. 对真人模特追加严格负向锁
 
 已经落地的典型约束：
 
 - `real_human_model`：禁止新增饰品、包、帽子、手表
 - `shoes_resting`：锁死原始透视与地面接触关系
-- `apparel_leaning`：强制墙面与地面交角
+- `apparel_leaning`：只允许硬挺结构类商品使用
+- `fabric_soft`：强制改写为平铺/悬挂安全路径，避免软衣物靠墙
+- `reflective_glass`：自动注入焦散反射、镜面反射与透明材质高光
+- `leather_or_pu`：自动注入皮纹高光和高级材质边缘光
 - `food_plated`：强制暖色食欲光影
 
 ### 4. 本地图像预处理
@@ -150,6 +162,7 @@
 
 - `dynamic_props`
 - `camera_perspective`
+- `material_type`
 - `dynamic_spatial_anchor`
 - `dynamic_lighting_needs`
 - `primary_sku_description`

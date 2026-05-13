@@ -16,6 +16,7 @@ class GenerationTaskSlotResponse(BaseModel):
     intent_reason: str | None = None
     subject_type: str | None = None
     sku_category: str | None = None
+    material_type: str | None = None
     suggested_scene: str | None = None
     suggested_scene_recipe: str | None = None
     dynamic_spatial_anchor: str | None = None

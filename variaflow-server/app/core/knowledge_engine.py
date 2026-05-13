@@ -14,6 +14,116 @@ DEFAULT_PROP_RULES = {
     "banned_terms": {"watch"},
 }
 
+SUPPORTED_MATERIAL_TYPES = (
+    "fabric_soft",
+    "fabric_stiff",
+    "reflective_glass",
+    "leather_or_pu",
+    "matte_solid",
+)
+
+MATERIAL_LIGHTING_RULES = {
+    "fabric_soft": "Soft diffused lighting to highlight textile weave, visible knit depth, natural fabric folds, and gentle shadow transitions, avoiding harsh shadows.",
+    "fabric_stiff": "Directional studio light to emphasize structured silhouette and tailoring.",
+    "reflective_glass": "Sharp caustic light reflections, backlighting to emphasize transparency and liquid textures, plus crisp mirror reflections and controlled highlight strips.",
+    "leather_or_pu": "Subtle specular highlights to showcase leather grain and premium material finish.",
+    "matte_solid": "Controlled commercial lighting with clean edge separation, realistic volume, and balanced surface detail.",
+}
+
+INVALID_CATEGORY_POSES = {
+    "apparel_flat": ("leaning", "standing_upright"),
+    "apparel_hanging": ("leaning", "laying_flat"),
+    "plush_sitting": ("leaning_against_wall",),
+}
+
+CATEGORY_POSE_ALIASES = {
+    "apparel_flat": "laying_flat",
+    "apparel_hanging": "hanging",
+    "apparel_leaning": "leaning",
+    "apparel_invisible_mannequin": "standing_upright",
+    "plush_sitting": "sitting",
+}
+
+SOFT_APPAREL_DESCRIPTION_KEYWORDS = {
+    "hoodie",
+    "sweater",
+    "knit",
+    "knitted",
+    "cardigan",
+    "jumper",
+    "sweatshirt",
+    "tee",
+    "t-shirt",
+    "shirt",
+    "blouse",
+    "dress",
+    "skirt",
+    "jeans",
+    "pants",
+    "trousers",
+    "coat",
+    "jacket",
+    "fleece",
+    "wool",
+    "cashmere",
+    "garment",
+    "apparel",
+    "pullover",
+}
+
+GLASS_LIQUID_MATERIAL_KEYWORDS = {
+    "glass",
+    "serum",
+    "perfume",
+    "essence",
+    "ampoule",
+    "liquid",
+    "oil",
+    "lotion",
+    "toner",
+    "mist",
+    "translucent",
+}
+
+STIFF_FABRIC_MATERIAL_KEYWORDS = {
+    "blazer",
+    "suit",
+    "tailored",
+    "tailoring",
+    "structured",
+    "trench",
+    "denim jacket",
+    "corset",
+    "puffer",
+    "quilted",
+}
+
+LEATHER_PU_MATERIAL_KEYWORDS = {
+    "leather",
+    "pu leather",
+    "faux leather",
+    "patent",
+    "suede",
+    "nubuck",
+}
+
+KNIT_FLEECE_MATERIAL_KEYWORDS = {
+    "knit",
+    "knitted",
+    "fleece",
+    "wool",
+    "cashmere",
+    "sweater",
+    "hoodie",
+    "cardigan",
+    "jumper",
+    "sweatshirt",
+    "soft-touch",
+    "soft touch",
+    "plush",
+    "fuzzy",
+}
+
 
 @dataclass(frozen=True, slots=True)
 class DomainConstraint:
@@ -129,6 +239,94 @@ def get_prompt_prefix(sku_category: str | None) -> str:
 def get_perspective_lock(sku_category: str | None) -> str:
     constraint = get_domain_constraint(sku_category)
     return constraint.perspective_lock if constraint else ""
+
+
+def _contains_any_keyword(text: str | None, keywords: set[str]) -> bool:
+    normalized = " ".join(str(text or "").strip().lower().split())
+    if not normalized:
+        return False
+    return any(keyword in normalized for keyword in keywords)
+
+
+def is_soft_apparel_product_description(primary_sku_description: str | None) -> bool:
+    return _contains_any_keyword(primary_sku_description, SOFT_APPAREL_DESCRIPTION_KEYWORDS)
+
+
+def normalize_material_type(material_type: str | None) -> str:
+    normalized = " ".join(str(material_type or "").strip().lower().split())
+    if normalized in SUPPORTED_MATERIAL_TYPES:
+        return normalized
+    return ""
+
+
+def resolve_material_type(
+    material_type: str | None,
+    primary_sku_description: str | None,
+    sku_category: str | None = None,
+) -> str:
+    normalized_material_type = normalize_material_type(material_type)
+    if normalized_material_type:
+        return normalized_material_type
+
+    normalized_category = str(sku_category or "").strip().lower()
+    if normalized_category in {"beauty_bottle", "beauty_bottle_standing", "bottle_standing"}:
+        return "reflective_glass"
+
+    if _contains_any_keyword(primary_sku_description, GLASS_LIQUID_MATERIAL_KEYWORDS):
+        return "reflective_glass"
+    if _contains_any_keyword(primary_sku_description, LEATHER_PU_MATERIAL_KEYWORDS):
+        return "leather_or_pu"
+    if _contains_any_keyword(primary_sku_description, STIFF_FABRIC_MATERIAL_KEYWORDS):
+        return "fabric_stiff"
+    if _contains_any_keyword(primary_sku_description, KNIT_FLEECE_MATERIAL_KEYWORDS):
+        return "fabric_soft"
+    if is_soft_apparel_product_description(primary_sku_description):
+        return "fabric_soft"
+
+    return "matte_solid"
+
+
+def is_physics_mutex_violation(
+    *,
+    sku_category: str | None,
+    material_type: str | None,
+    primary_sku_description: str | None,
+) -> bool:
+    normalized_category = str(sku_category or "").strip().lower()
+    pose_alias = CATEGORY_POSE_ALIASES.get(normalized_category, normalized_category)
+    effective_material_type = resolve_material_type(
+        material_type,
+        primary_sku_description,
+        normalized_category,
+    )
+
+    if effective_material_type == "fabric_soft":
+        return pose_alias in INVALID_CATEGORY_POSES["apparel_flat"]
+
+    return False
+
+
+def resolve_material_lighting_prompt(
+    material_type: str | None,
+    primary_sku_description: str | None,
+    existing_prompt: str | None = None,
+) -> str:
+    normalized_existing = " ".join(str(existing_prompt or "").split()).strip()
+    effective_material_type = resolve_material_type(
+        material_type,
+        primary_sku_description,
+    )
+    material_prompt = MATERIAL_LIGHTING_RULES.get(effective_material_type, "")
+    if not material_prompt:
+        return normalized_existing
+
+    if not normalized_existing:
+        return material_prompt
+
+    if material_prompt.lower() in normalized_existing.lower():
+        return normalized_existing
+
+    return f"{material_prompt} {normalized_existing}"
 
 
 def resolve_camera_perspective(

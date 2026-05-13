@@ -67,6 +67,7 @@ async def test_happy_path(monkeypatch: pytest.MonkeyPatch, mock_batch_data: dict
             raw_text='{"intent":"SCENE_EDIT"}',
             subject_type="product_only",
             sku_category="apparel_flat",
+            material_type="fabric_soft",
             suggested_scene="clean_fit_minimal",
             suggested_scene_recipe="clean_fit_minimal",
             dynamic_spatial_anchor="Placed naturally on a clean surface with realistic fabric volume and grounded folds.",
@@ -151,16 +152,27 @@ async def test_fallback_path(monkeypatch: pytest.MonkeyPatch, mock_batch_data: d
     ) -> tuple[bytes, dict]:
         del payload_json, source_image_bytes
         if provider_route == ProviderRoute.PRIMARY:
-            adapter = ai_provider.MockAIAdapter(ProviderRoute.FALLBACK)
-            result = await adapter.generate(client=None, payload_json={})
-            result.meta["switch_reason"] = "primary_timeout"
-            result.meta["provider_route"] = ProviderRoute.FALLBACK.value
-            return result.image_bytes, result.meta
-        adapter = ai_provider.MockAIAdapter(ProviderRoute.FALLBACK)
-        result = await adapter.generate(client=None, payload_json={})
-        return result.image_bytes, result.meta
+            return _build_deterministic_test_image_bytes(), {
+                "provider_code": "pytest_mock_fallback",
+                "provider_route": ProviderRoute.FALLBACK.value,
+                "request_url": "mock://fallback",
+                "http_status": 200,
+                "content_type": "image/png",
+                "mock": True,
+                "switch_reason": "primary_timeout",
+            }
+        return _build_deterministic_test_image_bytes(), {
+            "provider_code": "pytest_mock_fallback",
+            "provider_route": ProviderRoute.FALLBACK.value,
+            "request_url": "mock://fallback",
+            "http_status": 200,
+            "content_type": "image/png",
+            "mock": True,
+        }
 
     monkeypatch.setattr(ai_provider, "call_ai_provider", _primary_timeout_then_fallback_success)
+    monkeypatch.setattr("app.services.executor.call_ai_provider", _primary_timeout_then_fallback_success)
+    monkeypatch.setattr("app.services.executor.prepare_scene_edit_source_image", lambda image_path, temp_root, **kwargs: __import__("app.utils.image_processor", fromlist=["PreparedSceneEditImage"]).PreparedSceneEditImage(path=Path(image_path), background_removed=False, canvas_padded=False, anchor="original", canvas_size=(1024, 1024), subject_bbox=(0, 0, 1024, 1024), scale_ratio=1.0))
 
     async with session_factory() as session:
         locked = await fetch_and_lock_next_generation_task(
@@ -205,6 +217,8 @@ async def test_dead_letter_path(monkeypatch: pytest.MonkeyPatch, mock_batch_data
         raise _build_http_status_error(502, "mock://dead-letter", "all providers failed")
 
     monkeypatch.setattr(ai_provider, "call_ai_provider", _always_fail)
+    monkeypatch.setattr("app.services.executor.call_ai_provider", _always_fail)
+    monkeypatch.setattr("app.services.executor.prepare_scene_edit_source_image", lambda image_path, temp_root, **kwargs: __import__("app.utils.image_processor", fromlist=["PreparedSceneEditImage"]).PreparedSceneEditImage(path=Path(image_path), background_removed=False, canvas_padded=False, anchor="original", canvas_size=(1024, 1024), subject_bbox=(0, 0, 1024, 1024), scale_ratio=1.0))
 
     task_id = int(mock_batch_data["generation_task_ids"][0])
 
@@ -261,9 +275,14 @@ async def test_scene_edit_uses_transparent_preprocessing_for_openai_edit(
         assert provider_route == ProviderRoute.PRIMARY
         assert source_image_bytes is not None
         captured_payloads.append(dict(payload_json))
-        adapter = ai_provider.MockAIAdapter(provider_route)
-        result = await adapter.generate(client=None, payload_json={})
-        return result.image_bytes, result.meta
+        return _build_deterministic_test_image_bytes(), {
+            "provider_code": "pytest_mock_openai_image_edit",
+            "provider_route": provider_route.value,
+            "request_url": f"mock://{provider_route.value}",
+            "http_status": 200,
+            "content_type": "image/png",
+            "mock": True,
+        }
 
     async def _fake_analyze_image_intent(*, image_bytes: bytes, source_image_name: str):
         del image_bytes, source_image_name
@@ -275,6 +294,7 @@ async def test_scene_edit_uses_transparent_preprocessing_for_openai_edit(
             raw_text='{"intent":"SCENE_EDIT"}',
             subject_type="product_only",
             sku_category="apparel_flat",
+            material_type="fabric_soft",
             suggested_scene="cozy_winter_morning",
             suggested_scene_recipe="cozy_winter_morning",
             dynamic_spatial_anchor="Laid naturally on a soft textile surface with realistic hoodie volume and grounded folds.",
@@ -369,9 +389,14 @@ async def test_scene_edit_real_human_model_passes_background_mask_to_openai_edit
         assert provider_route == ProviderRoute.PRIMARY
         assert source_image_bytes is not None
         captured_payloads.append(dict(payload_json))
-        adapter = ai_provider.MockAIAdapter(provider_route)
-        result = await adapter.generate(client=None, payload_json={})
-        return result.image_bytes, result.meta
+        return _build_deterministic_test_image_bytes(), {
+            "provider_code": "pytest_mock_openai_image_edit",
+            "provider_route": provider_route.value,
+            "request_url": f"mock://{provider_route.value}",
+            "http_status": 200,
+            "content_type": "image/png",
+            "mock": True,
+        }
 
     async def _fake_analyze_image_intent(*, image_bytes: bytes, source_image_name: str):
         del image_bytes, source_image_name
@@ -383,6 +408,7 @@ async def test_scene_edit_real_human_model_passes_background_mask_to_openai_edit
             raw_text='{"intent":"SCENE_EDIT"}',
             subject_type="human_model",
             sku_category="real_human_model",
+            material_type="fabric_stiff",
             suggested_scene="french_street_vibe",
             suggested_scene_recipe="french_street_vibe",
             dynamic_spatial_anchor="Keep the real model naturally grounded in the frame with intact body continuity and realistic stance.",

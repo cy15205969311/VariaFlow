@@ -11,6 +11,11 @@ from typing import Any
 import httpx
 
 from app.core.config import settings
+from app.core.knowledge_engine import (
+    SUPPORTED_MATERIAL_TYPES,
+    is_soft_apparel_product_description,
+    resolve_material_type,
+)
 from app.core.prompt_lexicon import SCENE_RECIPES
 
 logger = logging.getLogger(__name__)
@@ -48,11 +53,17 @@ SUPPORTED_SKU_CATEGORIES = {
 }
 SUPPORTED_SCENE_RECIPE_KEYS = tuple(SCENE_RECIPES.keys())
 SUPPORTED_SCENE_RECIPE_TEXT = ", ".join(SUPPORTED_SCENE_RECIPE_KEYS)
+SUPPORTED_MATERIAL_TYPE_TEXT = ", ".join(SUPPORTED_MATERIAL_TYPES)
+SOFT_APPAREL_SAFE_SKU_CATEGORIES = {
+    "apparel_flat",
+    "apparel_hanging",
+    "apparel_invisible_mannequin",
+}
 
 VISION_SYSTEM_PROMPT = (
     "You are an ecommerce visual routing system. "
     "Analyze the primary subject in the image and classify it into exactly one intent. "
-    "Return only valid JSON with the keys intent, reason, subject_type, sku_category, suggested_scene, suggested_scene_recipe, dynamic_spatial_prompt, dynamic_lighting_prompt, primary_sku_description, secondary_props, dynamic_props, camera_perspective, subject_features, style_features, and background_features. "
+    "Return only valid JSON with the keys intent, reason, subject_type, sku_category, material_type, suggested_scene, suggested_scene_recipe, dynamic_spatial_prompt, dynamic_lighting_prompt, primary_sku_description, secondary_props, dynamic_props, camera_perspective, subject_features, style_features, and background_features. "
     "Use SCENE_EDIT for inanimate products or standard merchandise whose physical shape must stay unchanged. "
     "Use POSE_VARIATION for cartoon IP, mascots, animals, dolls, characters, or people whose pose, expression, styling, or outfit may vary. "
     "subject_type must be exactly one of: human_model, product_only. "
@@ -61,8 +72,10 @@ VISION_SYSTEM_PROMPT = (
     "CRITICAL RULE: If there is ANY human body part such as a face, torso, legs, arms, or hands wearing or interacting with the product in the image, the sku_category MUST strictly be classified as real_human_model. Do NOT classify it as flat lay or invisible mannequin if a human is present. "
     "sku_category must be exactly one of: apparel_flat, apparel_hanging, apparel_leaning, apparel_invisible_mannequin, shoes_resting, bag_standing, accessories_flat, beauty_bottle_standing, beauty_tube_flat, beauty_palette_open, jewelry_macro_display, watch_stand_display, electronic_flat, appliance_standing, furniture_room_setup, home_decor_resting, food_packaged_standing, food_plated, toy_standing, plush_sitting, virtual_ip_character, real_human_model, bottle_standing, box_standing, 3d_toy, other_flat. "
     "Choose sku_category based on the real-world physical placement that best matches the subject. It is a fallback routing hint, not the main creative output. "
-    "Use apparel_leaning when the product is best merchandised leaning against a wall or vertical surface with a visible floor-wall intersection. "
-    "If the desired merchandising mood is lifestyle-led hero imagery for a main apparel SKU, prefer apparel_leaning over apparel_flat when a leaning wall-floor setup would create a more premium commercial result. "
+    "Use apparel_leaning only for rigid or structured fashion subjects that can physically lean, such as structured bags or footwear-inspired rigid display setups. "
+    "CRITICAL PHYSICS RULE: soft single-garment apparel such as sweaters, hoodies, shirts, knitwear, fleece, dresses, pants, or other gravity-sensitive clothing MUST NOT be classified as apparel_leaning. Soft apparel must stay within apparel_flat, apparel_hanging, apparel_invisible_mannequin, or real_human_model. "
+    f"material_type must be exactly one of: {SUPPORTED_MATERIAL_TYPE_TEXT}. "
+    "CRITICAL PHYSICS CHECK: Soft clothing items such as sweaters, hoodies, t-shirts, dresses, or fleece lack internal structure and CANNOT lean against a wall like a rigid board. If the item is soft apparel, you MUST NOT suggest apparel_leaning or any standing display logic. "
     f"suggested_scene_recipe must be exactly one of these recipe keys: {SUPPORTED_SCENE_RECIPE_TEXT}. "
     "Choose the recipe key that best matches the product's material, mood, target lifestyle, conversion intent, and ecommerce merchandising potential. "
     "For SCENE_EDIT, suggested_scene must mirror suggested_scene_recipe exactly. "
@@ -72,12 +85,14 @@ VISION_SYSTEM_PROMPT = (
     "For SCENE_EDIT, dynamic_spatial_prompt and dynamic_lighting_prompt must be concrete, production-ready instructions rather than abstract commentary. "
     "For SCENE_EDIT, dynamic_props must be a JSON array containing zero to two complementary ecommerce styling props that enhance conversion without replacing the product. "
     "dynamic_props should contain generic commercially useful prop suggestions such as tactile materials, paper goods, ceramic accents, ribbons, stone accents, or editorial lifestyle details, and should avoid overly specific branded objects. "
+    "For SCENE_EDIT, material_type must capture the dominant physical material category that will drive lighting, reflections, and physics realism. "
     "camera_perspective must be a short English label such as top-down, 45-degree angle, eye-level, or low-angle. "
     "For apparel_flat, prefer top-down. For apparel_hanging, prefer eye-level. For apparel_leaning, prefer angular side-view such as 30-to-45-degree angle. For shoes_resting, capture the exact low-angle or side angle from the original reference. "
     "If the subject is shoes or another perspective-sensitive 3D product, camera_perspective must capture the original viewing angle precisely. "
     "For POSE_VARIATION, dynamic_spatial_prompt and dynamic_lighting_prompt should be empty strings. "
     "For POSE_VARIATION, dynamic_props should be an empty array. "
     "For POSE_VARIATION, camera_perspective should be an empty string. "
+    "For POSE_VARIATION, material_type should be matte_solid unless the product identity clearly depends on a reflective or soft textile material. "
     "primary_sku_description must be a concise English description of the core sellable subject that must remain dominant, such as 'green collared knit sweater' or 'matte black ankle boots'. "
     "secondary_props must be a concise English comma-separated list of non-core accessories, styling props, or supporting items that may be optional, removable, or de-emphasized. "
     "When analyzing a real_human_model image, identify the visually dominant garment or apparel item as primary_sku_description. "
@@ -89,7 +104,7 @@ VISION_SYSTEM_PROMPT = (
     "For POSE_VARIATION, background_features must describe the original background environment, color atmosphere, and scene context. "
     "Do not mention the current pose, gesture, camera angle, background, temporary clothing, props, or temporary accessories unless they are permanent identity traits. "
     "For SCENE_EDIT, subject_features, style_features, and background_features must all be empty strings, but subject_type, sku_category, suggested_scene, suggested_scene_recipe, dynamic_spatial_prompt, dynamic_lighting_prompt, primary_sku_description, dynamic_props, and camera_perspective must be filled. "
-    'Example: {"intent":"POSE_VARIATION","reason":"cartoon mascot character with editable pose and outfit","subject_type":"product_only","sku_category":"3d_toy","suggested_scene":"","suggested_scene_recipe":"soft_girly_lifestyle","dynamic_spatial_prompt":"","dynamic_lighting_prompt":"","primary_sku_description":"3D blind-box monkey mascot figure","secondary_props":"yellow jacket, gingerbread prop","dynamic_props":[],"camera_perspective":"","subject_features":"3D chibi cartoon monkey, large brown eyes, fluffy light brown fur, big round ears, oversized head-to-body ratio","style_features":"polished 3D blind-box render, soft global illumination, glossy collectible toy finish","background_features":"warm indoor studio backdrop with clean gradient and soft ambient shadows"}'
+    'Example: {"intent":"POSE_VARIATION","reason":"cartoon mascot character with editable pose and outfit","subject_type":"product_only","sku_category":"3d_toy","material_type":"matte_solid","suggested_scene":"","suggested_scene_recipe":"soft_girly_lifestyle","dynamic_spatial_prompt":"","dynamic_lighting_prompt":"","primary_sku_description":"3D blind-box monkey mascot figure","secondary_props":"yellow jacket, gingerbread prop","dynamic_props":[],"camera_perspective":"","subject_features":"3D chibi cartoon monkey, large brown eyes, fluffy light brown fur, big round ears, oversized head-to-body ratio","style_features":"polished 3D blind-box render, soft global illumination, glossy collectible toy finish","background_features":"warm indoor studio backdrop with clean gradient and soft ambient shadows"}'
 )
 
 JSON_OBJECT_PATTERN = re.compile(r"\{.*?\}", re.DOTALL)
@@ -102,6 +117,7 @@ class VisionRouteDecision:
     raw_text: str
     subject_type: str = "product_only"
     sku_category: str = "other_flat"
+    material_type: str = "matte_solid"
     suggested_scene: str = ""
     suggested_scene_recipe: str = ""
     dynamic_spatial_anchor: str = ""
@@ -224,10 +240,49 @@ def _normalize_dynamic_props(value: Any, intent: str) -> list[str]:
     return normalized_props
 
 
+def _normalize_material_type(value: Any, intent: str, primary_sku_description: str = "", sku_category: str = "") -> str:
+    if intent not in {INTENT_SCENE_EDIT, INTENT_POSE_VARIATION}:
+        return "matte_solid"
+    return resolve_material_type(str(value or ""), primary_sku_description, sku_category)
+
+
 def _normalize_camera_perspective(value: Any, intent: str) -> str:
     if intent != INTENT_SCENE_EDIT:
         return ""
     return _normalize_text_field(value)
+
+
+def _normalize_soft_apparel_routing(
+    *,
+    sku_category: str,
+    primary_sku_description: str,
+    dynamic_spatial_anchor: str,
+    camera_perspective: str,
+) -> tuple[str, str, str]:
+    if sku_category != "apparel_leaning":
+        return sku_category, dynamic_spatial_anchor, camera_perspective
+
+    if not is_soft_apparel_product_description(primary_sku_description):
+        return sku_category, dynamic_spatial_anchor, camera_perspective
+
+    normalized_anchor = dynamic_spatial_anchor.lower()
+    prefers_hanging = any(
+        keyword in normalized_anchor
+        for keyword in ("hang", "hanger", "drape", "vertical", "suspended")
+    )
+
+    if prefers_hanging:
+        return (
+            "apparel_hanging",
+            "Hanging naturally with realistic vertical fabric drape, soft gravity fall, and clear top support alignment.",
+            "eye-level",
+        )
+
+    return (
+        "apparel_flat",
+        "Laid naturally on a flat surface with realistic fabric folds, soft textile volume, and grounded garment edges.",
+        "top-down",
+    )
 
 
 def _image_to_data_url(image_bytes: bytes, source_image_name: str) -> str:
@@ -254,7 +309,7 @@ def _build_payload(image_data_url: str) -> dict[str, Any]:
                         "type": "text",
                         "text": (
                             "Classify this image as SCENE_EDIT or POSE_VARIATION. "
-                            "Return only JSON with intent, reason, subject_type, sku_category, suggested_scene, suggested_scene_recipe, dynamic_spatial_prompt, dynamic_lighting_prompt, primary_sku_description, secondary_props, dynamic_props, camera_perspective, subject_features, style_features, and background_features."
+                            "Return only JSON with intent, reason, subject_type, sku_category, material_type, suggested_scene, suggested_scene_recipe, dynamic_spatial_prompt, dynamic_lighting_prompt, primary_sku_description, secondary_props, dynamic_props, camera_perspective, subject_features, style_features, and background_features."
                         ),
                     },
                     {
@@ -306,6 +361,7 @@ async def analyze_image_intent(
             raw_text="",
             subject_type="product_only",
             sku_category="other_flat",
+            material_type="matte_solid",
             suggested_scene="",
             suggested_scene_recipe="",
             dynamic_spatial_anchor="",
@@ -367,6 +423,7 @@ async def analyze_image_intent(
             raw_text="",
             subject_type="product_only",
             sku_category="other_flat",
+            material_type="matte_solid",
             suggested_scene="",
             suggested_scene_recipe="",
             dynamic_spatial_anchor="",
@@ -407,16 +464,29 @@ async def analyze_image_intent(
         primary_sku_description = _normalize_text_field(parsed.get("primary_sku_description"))
         secondary_props = _normalize_text_field(parsed.get("secondary_props"))
         dynamic_props = _normalize_dynamic_props(parsed.get("dynamic_props"), intent)
+        material_type = _normalize_material_type(
+            parsed.get("material_type"),
+            intent,
+            primary_sku_description,
+            sku_category,
+        )
         camera_perspective = _normalize_camera_perspective(parsed.get("camera_perspective"), intent)
         subject_features = _normalize_subject_features(parsed.get("subject_features"), intent)
         style_features = _normalize_feature_text(parsed.get("style_features"), intent)
         background_features = _normalize_feature_text(parsed.get("background_features"), intent)
+        sku_category, dynamic_spatial_anchor, camera_perspective = _normalize_soft_apparel_routing(
+            sku_category=sku_category,
+            primary_sku_description=primary_sku_description,
+            dynamic_spatial_anchor=dynamic_spatial_anchor,
+            camera_perspective=camera_perspective,
+        )
         return VisionRouteDecision(
             intent=intent,
             reason=reason,
             raw_text=raw_text,
             subject_type=subject_type,
             sku_category=sku_category,
+            material_type=material_type,
             suggested_scene=suggested_scene,
             suggested_scene_recipe=suggested_scene_recipe,
             dynamic_spatial_anchor=dynamic_spatial_anchor,
@@ -438,6 +508,7 @@ async def analyze_image_intent(
             raw_text="",
             subject_type="product_only",
             sku_category="other_flat",
+            material_type="matte_solid",
             suggested_scene="",
             suggested_scene_recipe="",
             dynamic_spatial_anchor="",

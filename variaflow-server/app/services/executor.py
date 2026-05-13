@@ -162,6 +162,7 @@ async def _prepare_execution_context(
         style_features=vision_decision.style_features,
         background_features=vision_decision.background_features,
         sku_category=vision_decision.sku_category,
+        material_type=vision_decision.material_type,
         suggested_scene=vision_decision.suggested_scene,
         suggested_scene_recipe=vision_decision.suggested_scene_recipe,
         dynamic_spatial_anchor=vision_decision.dynamic_spatial_anchor,
@@ -177,6 +178,7 @@ async def _prepare_execution_context(
     )
     payload["subject_type"] = vision_decision.subject_type
     payload["sku_category"] = vision_decision.sku_category
+    payload["material_type"] = vision_decision.material_type
     payload["suggested_scene"] = vision_decision.suggested_scene
     payload["suggested_scene_recipe"] = vision_decision.suggested_scene_recipe
     payload["dynamic_spatial_anchor"] = vision_decision.dynamic_spatial_anchor
@@ -194,6 +196,7 @@ async def _prepare_execution_context(
     prompt_snapshot["subject_type"] = vision_decision.subject_type
     prompt_snapshot["dynamic_spatial_anchor"] = vision_decision.dynamic_spatial_anchor
     prompt_snapshot["dynamic_lighting_needs"] = vision_decision.dynamic_lighting_needs
+    prompt_snapshot["material_type"] = vision_decision.material_type
     prompt_snapshot["primary_sku_description"] = vision_decision.primary_sku_description
     prompt_snapshot["secondary_props"] = vision_decision.secondary_props
     prompt_snapshot["dynamic_props"] = vision_decision.dynamic_props or []
@@ -207,6 +210,7 @@ async def _prepare_execution_context(
         "reason": vision_decision.reason,
         "subject_type": vision_decision.subject_type,
         "sku_category": vision_decision.sku_category,
+        "material_type": vision_decision.material_type,
         "suggested_scene": vision_decision.suggested_scene,
         "suggested_scene_recipe": vision_decision.suggested_scene_recipe,
         "dynamic_spatial_anchor": vision_decision.dynamic_spatial_anchor,

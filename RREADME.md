@@ -150,3 +150,17 @@ npm run build
 - 后端开发说明：[variaflow-server/README.md](/e:/e-commerce-project/VariaFlow/variaflow-server/README.md)
 - 测试说明：[variaflow-server/README_TEST.md](/e:/e-commerce-project/VariaFlow/variaflow-server/README_TEST.md)
 - 前端说明：[variaflow-ui/README.md](/e:/e-commerce-project/VariaFlow/variaflow-ui/README.md)
+
+## 最新补充
+
+### 物理互斥锁与材质感知
+
+- 视觉路由现在会额外输出 `material_type`，统一收敛为 `fabric_soft / fabric_stiff / reflective_glass / leather_or_pu / matte_solid`
+- 当商品被识别为软性织物时，后端会自动拦截 `apparel_leaning`，避免卫衣、毛衣这类商品出现违背重力的靠墙姿态
+- Prompt Builder 会把材质规则作为高优先级指令注入最终 Prompt，例如玻璃焦散反射、皮革高光、针织纹理柔光
+
+### Dashboard 大图预览
+
+- 任务卡片已支持点击原图与结果图打开毛玻璃预览层
+- 预览层画框固定为 `80vmin` 正方形，统一不同图片的观感尺寸
+- 支持点击遮罩关闭、Esc 关闭、透明图白底展示

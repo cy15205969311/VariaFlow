@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import random
 from typing import Any
 
@@ -13,6 +14,9 @@ from app.core.knowledge_engine import (
     get_negative_prompt_lock,
     get_perspective_lock,
     get_prompt_prefix,
+    is_physics_mutex_violation,
+    resolve_material_type,
+    resolve_material_lighting_prompt,
 )
 from app.core.prompt_lexicon import (
     CAMERA_TERMS,
@@ -26,6 +30,8 @@ from app.core.prompt_lexicon import (
     SCENE_RECIPES,
 )
 from app.models.tasks import BatchPromptConfig, GenerationTask, PromptProfile, PromptVariableOption, SourceTask
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_POSITIVE_TEMPLATE = (
     "Product photography. A high-quality image of the provided subject {{variant_directive}}. "
@@ -153,7 +159,15 @@ def _has_executable_dynamic_prompt(raw: str | None) -> bool:
         "light",
         "lighting",
         "reflection",
+        "reflections",
         "backlight",
+        "backlighting",
+        "highlight",
+        "highlights",
+        "diffused",
+        "texture",
+        "textures",
+        "specular",
         "top-down",
         "upright",
         "grounded",
@@ -175,6 +189,31 @@ def _fallback_spatial_anchor_for_sku(sku_category: str) -> str:
         sku_category,
         "Placed naturally in a believable real-world position with clear surface contact and realistic grounding.",
     )
+
+
+def _resolve_effective_scene_edit_category(
+    sku_category: str,
+    material_type: str | None,
+    primary_sku_description: str | None,
+) -> tuple[str, str | None, str | None]:
+    normalized_sku_category = str(sku_category or "").strip().lower()
+    if is_physics_mutex_violation(
+        sku_category=normalized_sku_category,
+        material_type=material_type,
+        primary_sku_description=primary_sku_description,
+    ):
+        logger.warning(
+            "Physics mutex lock triggered: sku_category=%s material_type=%s primary_sku_description=%s; forced to apparel_flat",
+            normalized_sku_category,
+            material_type,
+            primary_sku_description,
+        )
+        return (
+            "apparel_flat",
+            "Laid perfectly flat on the surface with natural gravity-driven fabric folds.",
+            "top-down",
+        )
+    return normalized_sku_category, None, None
 
 
 def _fallback_lighting_needs_for_sku(sku_category: str) -> str:
@@ -370,17 +409,45 @@ def _build_scene_edit_prompt(
     dynamic_props: list[str] | None = None,
     subject_type: str | None = None,
     camera_perspective: str | None = None,
+    material_type: str | None = None,
 ) -> str:
-    perspective_sentence = build_camera_perspective_sentence(camera_perspective, sku_category)
-    grounding_prompt = (
-        _normalize_scene_text(dynamic_spatial_anchor)
-        if _has_executable_dynamic_prompt(dynamic_spatial_anchor)
-        else _fallback_spatial_anchor_for_sku(sku_category)
+    effective_sku_category, forced_spatial_anchor, forced_camera_perspective = _resolve_effective_scene_edit_category(
+        sku_category,
+        material_type,
+        primary_sku_description,
     )
+    effective_camera_perspective = forced_camera_perspective or camera_perspective
+    effective_dynamic_spatial_anchor = forced_spatial_anchor or dynamic_spatial_anchor
+    perspective_sentence = build_camera_perspective_sentence(effective_camera_perspective, effective_sku_category)
+    grounding_prompt = (
+        _normalize_scene_text(effective_dynamic_spatial_anchor)
+        if _has_executable_dynamic_prompt(effective_dynamic_spatial_anchor)
+        else _fallback_spatial_anchor_for_sku(effective_sku_category)
+    )
+    resolved_material_type = resolve_material_type(
+        material_type,
+        primary_sku_description,
+        effective_sku_category,
+    )
+    normalized_dynamic_lighting = _normalize_scene_text(dynamic_lighting_needs)
+    if normalized_dynamic_lighting and _has_executable_dynamic_prompt(normalized_dynamic_lighting):
+        resolved_lighting_prompt = resolve_material_lighting_prompt(
+            resolved_material_type,
+            primary_sku_description,
+            normalized_dynamic_lighting,
+        )
+    elif resolved_material_type in {"fabric_soft", "fabric_stiff", "reflective_glass", "leather_or_pu"}:
+        resolved_lighting_prompt = resolve_material_lighting_prompt(
+            resolved_material_type,
+            primary_sku_description,
+            "",
+        )
+    else:
+        resolved_lighting_prompt = ""
     lighting_prompt = (
-        _normalize_scene_text(dynamic_lighting_needs)
-        if _has_executable_dynamic_prompt(dynamic_lighting_needs)
-        else _fallback_lighting_needs_for_sku(sku_category)
+        resolved_lighting_prompt
+        if _has_executable_dynamic_prompt(resolved_lighting_prompt)
+        else _fallback_lighting_needs_for_sku(effective_sku_category)
     )
     primary_clause = primary_sku_description.strip() if primary_sku_description and primary_sku_description.strip() else (
         "the core sellable product"
@@ -388,7 +455,7 @@ def _build_scene_edit_prompt(
     secondary_clause = secondary_props.strip() if secondary_props and secondary_props.strip() else "secondary styling props"
     normalized_dynamic_props = filter_dynamic_props(
         dynamic_props=_normalize_dynamic_prop_list(dynamic_props),
-        sku_category=sku_category,
+        sku_category=effective_sku_category,
         primary_sku_description=primary_sku_description,
     )
     props_instruction = ""
@@ -403,12 +470,12 @@ def _build_scene_edit_prompt(
         if normalized_subject_type == "human_model"
         else f"Secondary elements like [{secondary_clause}] may be adapted naturally if they are not core to the sale."
     )
-    category_constraint = get_category_constraint(sku_category) or DEFAULT_PHYSICAL_CONSTRAINT
-    perspective_constraint = build_camera_perspective_constraint(camera_perspective, sku_category)
-    special_lock = get_perspective_lock(sku_category)
-    negative_lock = get_negative_prompt_lock(sku_category)
-    prompt_prefix = get_prompt_prefix(sku_category)
-    if normalized_subject_type == "human_model" or sku_category == "real_human_model":
+    category_constraint = get_category_constraint(effective_sku_category) or DEFAULT_PHYSICAL_CONSTRAINT
+    perspective_constraint = build_camera_perspective_constraint(effective_camera_perspective, effective_sku_category)
+    special_lock = get_perspective_lock(effective_sku_category)
+    negative_lock = get_negative_prompt_lock(effective_sku_category)
+    prompt_prefix = get_prompt_prefix(effective_sku_category)
+    if normalized_subject_type == "human_model" or effective_sku_category == "real_human_model":
         props_instruction = ""
 
     base_prompt = (
@@ -590,6 +657,7 @@ def build_provider_payload(
     dynamic_props: list[str] | None = None,
     subject_type: str | None = None,
     camera_perspective: str | None = None,
+    material_type: str | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """
     组装发往模型网关的标准化载荷，并同时返回一份可落库审计的快照。
@@ -642,6 +710,11 @@ def build_provider_payload(
     normalized_sku_category = str(sku_category or "other_flat").strip().lower() or "other_flat"
     normalized_primary_sku_description = _normalize_scene_text(primary_sku_description)
     normalized_secondary_props = _normalize_accessory_text(secondary_props)
+    normalized_material_type = resolve_material_type(
+        material_type,
+        normalized_primary_sku_description,
+        normalized_sku_category,
+    )
     normalized_scene_recipe_input = _normalize_scene_recipe_key(suggested_scene_recipe) or _normalize_scene_recipe_key(suggested_scene)
     resolved_scene_recipe_key, resolved_scene_recipe = _resolve_scene_environment(
         suggested_scene=normalized_scene_recipe_input,
@@ -712,12 +785,14 @@ def build_provider_payload(
             dynamic_props=resolved_dynamic_props,
             subject_type=subject_type,
             camera_perspective=camera_perspective,
+            material_type=normalized_material_type,
         )
 
     prompt_snapshot = {
         "intent": normalized_intent,
         "intent_reason": intent_reason,
         "sku_category": normalized_sku_category,
+        "material_type": normalized_material_type,
         "suggested_scene": resolved_scene_recipe_key if normalized_intent == "SCENE_EDIT" else "",
         "suggested_scene_recipe": resolved_scene_recipe_key,
         "suggested_scene_prompt": resolved_scene_environment if normalized_intent == "SCENE_EDIT" else "",
@@ -748,6 +823,7 @@ def build_provider_payload(
         "aliyun_model": settings.aliyun_wanx_model,
         "intent": normalized_intent,
         "sku_category": normalized_sku_category,
+        "material_type": normalized_material_type,
         "suggested_scene": resolved_scene_recipe_key if normalized_intent == "SCENE_EDIT" else "",
         "suggested_scene_recipe": resolved_scene_recipe_key,
         "suggested_scene_prompt": resolved_scene_environment if normalized_intent == "SCENE_EDIT" else "",
