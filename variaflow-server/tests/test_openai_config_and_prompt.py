@@ -132,16 +132,13 @@ def test_build_provider_payload_injects_grounding_prompt_for_scene_edit() -> Non
     assert snapshot["primary_sku_description"] == "glass skincare bottle"
     assert snapshot["secondary_props"] == "folded towel, glass dropper"
     assert snapshot["dynamic_props"] == ["glass accent", "folded spa textile"]
-    assert "SPATIAL GROUNDING:" in payload["prompt"]
-    assert "LIGHTING & MATERIAL:" in payload["prompt"]
-    assert "ENVIRONMENT & VIBE:" in payload["prompt"]
-    assert "CRITICAL IDENTITY LOCK:" in payload["prompt"]
+    assert "[glass skincare bottle] exactly as shown." in payload["prompt"]
     assert "Aesthetically integrate the following complementary props into the scene: glass accent, folded spa textile." in payload["prompt"]
     assert "Standing upright on a solid stone surface with crisp contact shadow directly beneath the base." in payload["prompt"]
     assert "Use bright reflective skincare lighting with clean highlights and controlled glass reflections." in payload["prompt"]
     assert SCENE_RECIPES["natural_skincare_luxury"] in payload["prompt"]
     assert payload["suggested_scene_prompt"].startswith(SCENE_RECIPES["natural_skincare_luxury"])
-    assert NEGATIVE_SPACE_COMPOSITION_RULE in payload["prompt"]
+    assert "Elegant negative space for ecommerce typography" in payload["prompt"]
 
 
 def test_build_provider_payload_supports_expanded_sku_grounding_dictionary() -> None:
@@ -441,7 +438,7 @@ def test_build_provider_payload_injects_shoe_perspective_lock_and_camera_perspec
     assert "Shot from a consistent 45-degree angle perspective." in payload["prompt"]
     assert "CRITICAL: Match the camera angle and perspective of the original shoe exactly." in payload["prompt"]
     assert "The background must be generated from the same 45-degree angle perspective as the original product." in payload["prompt"]
-    assert "Ensure the ground plane matches the reference shoe orientation. No geometric warping. Realistic pressure shadows at the contact points." in payload["prompt"]
+    assert "No geometric warping" in payload["prompt"]
 
 
 def test_build_provider_payload_injects_human_model_strict_lock_without_extra_props() -> None:
@@ -477,14 +474,15 @@ def test_build_provider_payload_injects_human_model_strict_lock_without_extra_pr
         camera_perspective="eye-level",
     )
 
-    assert payload["camera_perspective"] == "eye-level"
-    assert snapshot["camera_perspective"] == "eye-level"
-    assert "Shot from a consistent eye-level perspective." in payload["prompt"]
-    assert "ABSOLUTELY DO NOT add any new accessories, jewelry, bags, or props to the human model." in payload["prompt"]
-    assert "NEGATIVE PROMPT LOCK: ABSOLUTELY DO NOT add any new accessories, jewelry, bags, or props to the human model." in payload["prompt"]
-    assert "Strictly NO new accessories, NO extra jewelry, NO bags, NO watches, NO hats. Preserve every pixel of the person and clothing." in payload["prompt"]
-    assert "Match the original reference camera perspective: eye-level." in payload["prompt"]
+    assert payload["camera_perspective"] == "low-angle"
+    assert snapshot["camera_perspective"] == "low-angle"
+    assert payload["dynamic_props"] == []
+    assert snapshot["dynamic_props"] == []
+    assert "Shot from a consistent low-angle perspective." in payload["prompt"]
+    assert "Low-angle shot from waist level, fashion photography style, visually elongating the model's legs and proportions." in payload["prompt"]
+    assert "No new accessories or extra objects on the model. Preserve the person and clothing exactly." in payload["prompt"]
     assert "Aesthetically integrate the following complementary props into the scene:" not in payload["prompt"]
+    assert "Minimalist empty background, no extra objects." in payload["prompt"]
 
 
 def test_build_provider_payload_injects_leaning_prefix_and_domain_props() -> None:
@@ -519,12 +517,12 @@ def test_build_provider_payload_injects_leaning_prefix_and_domain_props() -> Non
         camera_perspective="30-to-45-degree angle",
     )
 
-    assert payload["camera_perspective"] == "30-to-45-degree angle"
-    assert snapshot["camera_perspective"] == "30-to-45-degree angle"
+    assert payload["camera_perspective"] == "top-down"
+    assert snapshot["camera_perspective"] == "top-down"
     assert "A composition featuring a clean 90-degree intersection of a vertical minimalist wall and a horizontal solid floor. The apparel is leaning naturally against the wall." not in payload["prompt"]
     assert "Must generate a clear 90-degree intersection between a vertical wall and a horizontal floor." not in payload["prompt"]
     assert "Must preserve realistic fabric folds, grounded wrinkles, and tight contact shadows directly around the garment edges." in payload["prompt"]
-    assert "Aesthetically integrate the following complementary props into the scene:" in payload["prompt"]
+    assert "Minimalist empty background, no extra objects." in payload["prompt"]
 
 
 def test_build_provider_payload_blocks_soft_apparel_leaning_and_falls_back_to_flat_logic() -> None:
@@ -560,7 +558,8 @@ def test_build_provider_payload_blocks_soft_apparel_leaning_and_falls_back_to_fl
         camera_perspective="",
     )
 
-    assert snapshot["sku_category"] == "apparel_leaning"
+    assert snapshot["sku_category"] == "apparel_flat"
+    assert payload["sku_category"] == "apparel_flat"
     assert snapshot["material_type"] == "fabric_soft"
     assert "A composition featuring a clean 90-degree intersection of a vertical minimalist wall and a horizontal solid floor." not in payload["prompt"]
     assert "Must preserve realistic fabric folds, grounded wrinkles, and tight contact shadows directly around the garment edges." in payload["prompt"]
@@ -708,6 +707,44 @@ def test_build_provider_payload_filters_watch_for_non_business_sku() -> None:
     assert payload["dynamic_props"] == ["straw hat", "sunscreen"]
     assert snapshot["dynamic_props"] == ["straw hat", "sunscreen"]
     assert "watch" not in payload["prompt"].lower()
+
+
+def test_build_provider_payload_clears_props_for_apparel_flat() -> None:
+    batch = SimpleNamespace(batch_code="batch-009b")
+    source_task = SimpleNamespace(
+        source_name="S0013_src_mock.png",
+        source_ext="png",
+        source_path="E:/tmp/S0013_src_mock.png",
+        identity_profile_json={"identity_lock": "Keep the same subject identity."},
+        batch=batch,
+        id=13,
+        source_hash="flat-clean-001",
+    )
+    generation_task = SimpleNamespace(
+        id=113,
+        variant_index=1,
+        variant_axis=SimpleNamespace(value="scene"),
+    )
+
+    payload, snapshot = build_provider_payload(
+        source_task,
+        generation_task,
+        intent="SCENE_EDIT",
+        sku_category="apparel_flat",
+        suggested_scene="cozy_winter_morning",
+        suggested_scene_recipe="cozy_winter_morning",
+        dynamic_spatial_anchor="Laid naturally on a clean textile surface with realistic fabric folds.",
+        dynamic_lighting_needs="Use soft commercial daylight with gentle textile depth.",
+        primary_sku_description="white oversized hoodie",
+        secondary_props="none",
+        dynamic_props=["warm ceramic accent", "soft knit textile accent"],
+        camera_perspective="top-down",
+    )
+
+    assert payload["dynamic_props"] == []
+    assert snapshot["dynamic_props"] == []
+    assert "Aesthetically integrate the following complementary props into the scene:" not in payload["prompt"]
+    assert "Minimalist empty background, no extra objects." in payload["prompt"]
 
 
 def test_default_aliyun_imageedit_strength_is_high_enough_for_pose_variation() -> None:

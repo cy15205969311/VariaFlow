@@ -7,8 +7,16 @@ const request = axios.create({
 });
 
 request.interceptors.response.use(
-  (response) => response.data,
+  (response) => {
+    if (response.config.responseType === "blob") {
+      return response;
+    }
+    return response.data;
+  },
   (error) => {
+    if (error?.config?.responseType === "blob") {
+      return Promise.reject(error);
+    }
     const detail =
       error?.response?.data?.detail ||
       error?.response?.data?.message ||

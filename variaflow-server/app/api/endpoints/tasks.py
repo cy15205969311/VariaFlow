@@ -13,6 +13,7 @@ from app.core.config import settings
 from app.models.enums import BatchStatus, QCStatus, SourceTaskStatus, TaskStatus
 from app.models.tasks import GenerationTask, SourceTask
 from app.schemas.tasks import GenerationTaskSlotResponse, TaskListResponse, TaskResponse
+from app.services.async_tasks import enqueue_generation_task
 from app.services.executor import _recompute_source_and_batch_state
 
 router = APIRouter()
@@ -287,6 +288,9 @@ async def retry_generation_task(
 
     await session.flush()
     await _recompute_source_and_batch_state(session, task_id=task.id)
+
+    if settings.async_execution_mode == "celery":
+        enqueue_generation_task(task.id)
 
     return {
         "task_id": generation_task_id,

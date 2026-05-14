@@ -6,6 +6,7 @@
 - 批次状态轮询
 - 原图任务与生成槽位展示
 - 输出图预览
+- 批次结果 ZIP 下载
 - 手动重试与异常定位辅助
 
 ## 技术栈
@@ -54,6 +55,20 @@ npm run dev
 - 拉取失败时前端会弹出错误提示，而不是静默卡住
 - `refreshAll()` 内部已补充控制台错误日志
 - `watch(currentBatchId)` 使用 `flush: "post"`，减少页面切换阶段的竞态
+
+### 2.1 批次 ZIP 下载
+
+核心文件：
+
+- `src/views/Dashboard/index.vue`
+- `src/api/batch.js`
+
+本轮已加固：
+
+- 按钮通过 `download_ready` 与 `downloadingBatch` 双重控制禁用态
+- Axios 下载请求使用 `responseType: "blob"`
+- 优先使用服务端 `Content-Disposition` 文件名
+- 若后端返回 blob 形态的错误 JSON 或文本，前端会解析并展示明确报错，而不是只看到下载失败
 
 ### 3. 任务展示
 

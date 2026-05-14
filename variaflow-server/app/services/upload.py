@@ -33,6 +33,12 @@ class NormalizedImage:
     source_size_bytes: int
 
 
+@dataclass(slots=True)
+class UploadBatchResult:
+    batch_id: int
+    generation_task_ids: list[int]
+
+
 def _compute_sha256(file_path: Path) -> str:
     hasher = hashlib.sha256()
     with file_path.open("rb") as file_handle:
@@ -167,7 +173,7 @@ async def _normalize_images(
     return unique_images
 
 
-async def process_upload(file: UploadFile, session: AsyncSession) -> BatchJob:
+async def process_upload(file: UploadFile, session: AsyncSession) -> UploadBatchResult:
     batch_code = f"batch_{uuid.uuid4().hex[:12]}"
     batch_root = settings.data_root / batch_code
     archive_root = batch_root / "input_archive"
@@ -244,6 +250,8 @@ async def process_upload(file: UploadFile, session: AsyncSession) -> BatchJob:
         total_generation_count=total_generation_count,
     )
 
+    generation_task_refs: list[GenerationTask] = []
+
     for normalized_image in normalized_images:
         source_task = SourceTask(
             source_index=normalized_image.source_index,
@@ -271,15 +279,17 @@ async def process_upload(file: UploadFile, session: AsyncSession) -> BatchJob:
             )
             for variant_index in range(1, target_variant_count + 1)
         ]
+        generation_task_refs.extend(source_task.generation_tasks)
         batch.source_tasks.append(source_task)
 
     try:
         async with session.begin():
             session.add(batch)
             await session.flush()
+            batch_id = int(batch.id)
+            generation_task_ids = [int(task.id) for task in generation_task_refs if task.id is not None]
             batch.status = BatchStatus.RUNNING
             batch.scheduler_started_at = datetime.utcnow()
-        await session.refresh(batch)
     except Exception as exc:
         logger.exception(
             "批次写库失败",
@@ -296,4 +306,4 @@ async def process_upload(file: UploadFile, session: AsyncSession) -> BatchJob:
             detail=f"数据库初始化批次失败：{exc}",
         ) from exc
 
-    return batch
+    return UploadBatchResult(batch_id=batch_id, generation_task_ids=generation_task_ids)

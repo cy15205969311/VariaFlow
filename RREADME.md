@@ -2,90 +2,65 @@
 
 VariaFlow 是一套面向电商商拍场景的批量 AI 出图系统，当前仓库包含两个核心子项目：
 
-- `variaflow-server`：FastAPI 后端，负责上传、任务切片、视觉路由、Prompt 组装、图像生成调度、QC 与结果落盘。
-- `variaflow-ui`：Vue 3 控制台，负责批次上传、任务轮询、结果展示与人工重试入口。
+- `variaflow-server`：FastAPI 后端，负责上传、任务切片、视觉路由、Prompt 组装、图像生成调度、质检与结果落盘。
+- `variaflow-ui`：Vue 3 控制台，负责批次上传、进度轮询、任务查看、结果预览与批量下载。
 
-## 本轮架构更新
+## 本轮架构升级
 
-### 1. 视觉中枢升级为“动态分析 + 轻量知识图谱”混合架构
+### 1. 从同步上传升级到异步队列
 
-视觉路由不再只输出简单的 `intent`，还会补充更强的结构化结果：
+系统已接入：
 
-- `subject_type`
-- `sku_category`
-- `primary_sku_description`
-- `secondary_props`
-- `dynamic_props`
-- `suggested_scene_recipe`
-- `dynamic_spatial_prompt`
-- `dynamic_lighting_prompt`
-- `camera_perspective`
+- `Celery`
+- `Redis`
+- 批次级进度聚合
+- 批次 ZIP 一键下载
 
-当前主原则：
+新的处理流程：
 
-- `SCENE_EDIT`：以商品不变形为核心，只重绘环境与辅陈。
-- `POSE_VARIATION`：用于 IP、角色、玩偶等动作/造型变体。
-- 只要原图里出现真实人体部位，`sku_category` 必须优先落到 `real_human_model`。
+1. 上传 ZIP。
+2. 后端完成解压、标准化与任务入库。
+3. 接口立即返回 `202 Accepted`。
+4. 每个生成任务异步进入 Celery 队列。
+5. Worker 独立消费并写回任务状态。
+6. 前端按批次展示总进度并在完成后开放下载。
 
-### 2. Prompt Builder 已接入电商知识图谱约束
+补充说明：
 
-后端现在会把视觉模型输出与领域知识一起编译成最终 Prompt：
+- Worker 侧数据库访问已采用 `NullPool` 隔离，避免 Windows + Celery + `asyncio.run()` 下的跨事件循环连接复用问题。
+- 批次 ZIP 下载只会收录成功落盘的大图，失败任务或缺失文件不会混入导出结果。
 
-- 相机视角约束：`camera_perspective`
-- 类目物理约束：如鞋靴落地、服饰斜靠、真人严格锁定
-- 动态 props 过滤：默认屏蔽不合理道具，如非商务场景下的 `watch`
-- 负向保护锁：真人模特禁止新增首饰、包、帽子等配件
+### 2. 前端批次体验增强
 
-新增核心文件：
+Dashboard 已新增：
 
-- `variaflow-server/app/core/knowledge_engine.py`
-- `variaflow-server/app/core/knowledge_graph.py`
+- 批次总进度条
+- `已完成 / 总数` 处理态展示
+- 一键打包下载按钮
+- 上传成功后的异步处理提示
+- 下载时自动读取服务端返回文件名
+- 下载失败时支持解析 blob 错误响应并弹出明确提示
 
-### 3. 场景重绘新增真人保护与智能排版
+### 3. 保留双模式运行
 
-`SCENE_EDIT` 在调用 OpenAI 之前会先执行本地预处理：
+环境变量：
 
-- 普通商品：透明底处理 + 智能缩放补白 + 锚点排版
-- `apparel_leaning`：新增“斜靠墙面”底部锚定策略
-- 真人模特：不再破坏原图像素，改为生成背景编辑遮罩并走 `images/edits`
+```env
+VARIAFLOW_ASYNC_EXECUTION_MODE=celery
+```
 
-这样可以同时解决：
+可切换：
 
-- 商品撑满画面导致无留白
-- 鞋靴/站立主体悬浮
-- 真人模特被误抠图或被模型“换人”
+- `celery`
+- `inline`
 
-### 4. 调度器已优先处理最新批次
-
-为了解决“旧批次长期占用队列，前端看不到新批次结果”的问题，调度器现在会优先消费最新上传的运行中批次，而不是一味按最早任务 ID 排序。
-
-核心改动文件：
-
-- `variaflow-server/app/services/scheduler.py`
-
-### 5. 上传与前端联调链路已加固
-
-上传与轮询链路补齐了防呆逻辑：
-
-- 后端上传接口补充异常日志，ZIP 解析失败不再静默
-- 前端上传成功后，立即刷新批次和任务列表
-- 上传响应缺少 `batch.id` 时直接报错
-- 轮询刷新失败时写入控制台，避免“进度条 100% 但界面无反馈”
-
-相关文件：
-
-- `variaflow-server/app/api/endpoints/batches.py`
-- `variaflow-server/app/services/upload.py`
-- `variaflow-ui/src/views/Dashboard/components/UploadEngine.vue`
-- `variaflow-ui/src/views/Dashboard/index.vue`
-- `variaflow-ui/src/stores/batch.js`
+这样可以兼顾生产异步吞吐与本地回退调试。
 
 ## 仓库结构
 
 ```text
 VariaFlow/
 |-- RREADME.md
-|-- image.zip
 |-- variaflow-server/
 |   |-- app/
 |   |   |-- api/
@@ -96,8 +71,8 @@ VariaFlow/
 |   |   |-- services/
 |   |   `-- utils/
 |   |-- tests/
-|   |-- README.md
-|   `-- README_TEST.md
+|   |-- worker.py
+|   `-- README.md
 `-- variaflow-ui/
     |-- src/
     `-- README.md
@@ -105,7 +80,13 @@ VariaFlow/
 
 ## 本地启动
 
-### 后端
+### Redis
+
+```powershell
+docker run -d --name variaflow-redis -p 6379:6379 redis:7-alpine
+```
+
+### 后端 API
 
 ```powershell
 cd variaflow-server
@@ -114,6 +95,13 @@ python -m venv .venv
 pip install -r requirements.txt
 copy .env.example .env
 uvicorn app.main:app --reload
+```
+
+### Celery Worker
+
+```powershell
+cd variaflow-server
+celery -A worker.celery_app worker --loglevel=info
 ```
 
 ### 前端
@@ -129,16 +117,16 @@ npm run dev
 - 后端：`http://127.0.0.1:8000`
 - 前端：`http://127.0.0.1:5173`
 
-## 推荐回归
+## 推荐验证
 
-### 后端关键回归
+### 后端
 
 ```powershell
 cd variaflow-server
-pytest -q tests/test_batches_endpoint.py tests/test_scheduler.py tests/test_recovery.py tests/test_executor.py::test_happy_path tests/test_vision_router.py tests/test_openai_config_and_prompt.py tests/test_image_processor.py
+pytest -q tests/test_batches_endpoint.py tests/test_recovery.py tests/test_scheduler.py tests/test_executor.py tests/test_openai_config_and_prompt.py -o asyncio_default_test_loop_scope=session
 ```
 
-### 前端构建校验
+### 前端
 
 ```powershell
 cd variaflow-ui
@@ -150,17 +138,3 @@ npm run build
 - 后端开发说明：[variaflow-server/README.md](/e:/e-commerce-project/VariaFlow/variaflow-server/README.md)
 - 测试说明：[variaflow-server/README_TEST.md](/e:/e-commerce-project/VariaFlow/variaflow-server/README_TEST.md)
 - 前端说明：[variaflow-ui/README.md](/e:/e-commerce-project/VariaFlow/variaflow-ui/README.md)
-
-## 最新补充
-
-### 物理互斥锁与材质感知
-
-- 视觉路由现在会额外输出 `material_type`，统一收敛为 `fabric_soft / fabric_stiff / reflective_glass / leather_or_pu / matte_solid`
-- 当商品被识别为软性织物时，后端会自动拦截 `apparel_leaning`，避免卫衣、毛衣这类商品出现违背重力的靠墙姿态
-- Prompt Builder 会把材质规则作为高优先级指令注入最终 Prompt，例如玻璃焦散反射、皮革高光、针织纹理柔光
-
-### Dashboard 大图预览
-
-- 任务卡片已支持点击原图与结果图打开毛玻璃预览层
-- 预览层画框固定为 `80vmin` 正方形，统一不同图片的观感尺寸
-- 支持点击遮罩关闭、Esc 关闭、透明图白底展示

@@ -46,17 +46,19 @@ async def _run_named_background_task(name: str, coroutine: Awaitable[None]) -> N
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    scheduler_task = asyncio.create_task(
-        _run_named_background_task(
-            "scheduler_loop",
-            run_scheduler_loop(
-                poll_interval_seconds=settings.scheduler_poll_interval_seconds,
-                lease_seconds=settings.worker_lease_seconds,
-                worker_name=settings.worker_name,
+    scheduler_task: asyncio.Task[None] | None = None
+    if settings.async_execution_mode == "inline":
+        scheduler_task = asyncio.create_task(
+            _run_named_background_task(
+                "scheduler_loop",
+                run_scheduler_loop(
+                    poll_interval_seconds=settings.scheduler_poll_interval_seconds,
+                    lease_seconds=settings.worker_lease_seconds,
+                    worker_name=settings.worker_name,
+                ),
             ),
-        ),
-        name="scheduler_loop",
-    )
+            name="scheduler_loop",
+        )
     recovery_task = asyncio.create_task(
         _run_named_background_task(
             "recovery_loop",
@@ -74,11 +76,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         for task in (scheduler_task, recovery_task):
-            task.cancel()
+            if task is not None:
+                task.cancel()
 
         for task in (scheduler_task, recovery_task):
-            with contextlib.suppress(asyncio.CancelledError):
-                await task
+            if task is not None:
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
 
         await close_engine()
 

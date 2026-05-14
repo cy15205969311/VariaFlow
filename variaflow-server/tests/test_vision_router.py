@@ -6,6 +6,7 @@ from app.services.vision_router import (
     SUPPORTED_SKU_CATEGORIES,
     SUPPORTED_SCENE_RECIPE_KEYS,
     VISION_SYSTEM_PROMPT,
+    _enforce_clean_background_dynamic_props,
     _extract_json_object,
     _extract_response_text,
     _normalize_feature_text,
@@ -115,6 +116,24 @@ def test_normalize_soft_apparel_routing_can_redirect_to_hanging_when_anchor_requ
     assert camera_perspective == "eye-level"
 
 
+def test_enforce_clean_background_dynamic_props_clears_props_for_apparel_flat_and_human_model() -> None:
+    assert _enforce_clean_background_dynamic_props(
+        intent=INTENT_SCENE_EDIT,
+        sku_category="apparel_flat",
+        dynamic_props=["coffee cup", "editorial card"],
+    ) == []
+    assert _enforce_clean_background_dynamic_props(
+        intent=INTENT_SCENE_EDIT,
+        sku_category="real_human_model",
+        dynamic_props=["linen editorial card"],
+    ) == []
+    assert _enforce_clean_background_dynamic_props(
+        intent=INTENT_SCENE_EDIT,
+        sku_category="bag_standing",
+        dynamic_props=["linen editorial card"],
+    ) == ["linen editorial card"]
+
+
 def test_normalize_subject_type_falls_back_from_sku() -> None:
     assert _normalize_subject_type("human_model") == "human_model"
     assert _normalize_subject_type("product_only") == "product_only"
@@ -159,6 +178,7 @@ def test_vision_system_prompt_excludes_temporary_clothing_and_props() -> None:
     assert "soft single-garment apparel such as sweaters, hoodies, shirts, knitwear, fleece, dresses, pants, or other gravity-sensitive clothing MUST NOT be classified as apparel_leaning" in VISION_SYSTEM_PROMPT
     assert "CRITICAL PHYSICS CHECK: Soft clothing items" in VISION_SYSTEM_PROMPT
     assert "For apparel_flat, prefer top-down. For apparel_hanging, prefer eye-level." in VISION_SYSTEM_PROMPT
+    assert "For apparel flat lays and human models, DO NOT suggest any props." in VISION_SYSTEM_PROMPT
     for category in SUPPORTED_SKU_CATEGORIES:
         assert category in VISION_SYSTEM_PROMPT
     for recipe_key in SUPPORTED_SCENE_RECIPE_KEYS:

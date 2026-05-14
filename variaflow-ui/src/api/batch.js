@@ -21,3 +21,11 @@ export function getBatchInfo(id) {
     method: "get",
   });
 }
+
+export function downloadBatchOutputs(id) {
+  return request({
+    url: `/batches/${id}/download`,
+    method: "get",
+    responseType: "blob",
+  });
+}

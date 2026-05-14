@@ -7,6 +7,7 @@ from typing import Any
 from app.core.config import settings
 from app.core.knowledge_engine import (
     DEFAULT_PHYSICAL_CONSTRAINT,
+    resolve_camera_perspective,
     build_camera_perspective_sentence,
     build_camera_perspective_constraint,
     filter_dynamic_props,
@@ -410,13 +411,16 @@ def _build_scene_edit_prompt(
     subject_type: str | None = None,
     camera_perspective: str | None = None,
     material_type: str | None = None,
-) -> str:
+) -> tuple[str, str, list[str], str]:
     effective_sku_category, forced_spatial_anchor, forced_camera_perspective = _resolve_effective_scene_edit_category(
         sku_category,
         material_type,
         primary_sku_description,
     )
-    effective_camera_perspective = forced_camera_perspective or camera_perspective
+    effective_camera_perspective = resolve_camera_perspective(
+        forced_camera_perspective or camera_perspective,
+        effective_sku_category,
+    )
     effective_dynamic_spatial_anchor = forced_spatial_anchor or dynamic_spatial_anchor
     perspective_sentence = build_camera_perspective_sentence(effective_camera_perspective, effective_sku_category)
     grounding_prompt = (
@@ -477,37 +481,30 @@ def _build_scene_edit_prompt(
     prompt_prefix = get_prompt_prefix(effective_sku_category)
     if normalized_subject_type == "human_model" or effective_sku_category == "real_human_model":
         props_instruction = ""
-
-    base_prompt = (
-        positive_template
-        .replace("{{identity_lock}}", identity_lock)
-        .replace("{{variant_directive}}", scene_variant_directive)
+    props_text = props_instruction or "Minimalist empty background, no extra objects."
+    detail_sentence = "Elegant negative space for ecommerce typography, realistic contact shadows, seamless commercial integration."
+    prompt_parts = [
+        f"[{primary_clause}] exactly as shown.",
+        perspective_sentence,
+        perspective_constraint,
+        prompt_prefix,
+        special_lock,
+        grounding_prompt,
+        scene_environment,
+        lighting_prompt,
+        props_text,
+        category_constraint,
+        secondary_policy,
+        negative_lock,
+        detail_sentence,
+        quality_template,
+    ]
+    final_prompt = " ".join(
+        fragment.strip().rstrip(".") + "."
+        for fragment in prompt_parts
+        if fragment and fragment.strip()
     )
-    return "\n".join(
-        fragment
-        for fragment in [
-            perspective_sentence,
-            prompt_prefix,
-            f"CRITICAL IDENTITY LOCK: You MUST preserve the exact design, shape, texture, and color of the primary subject: [{primary_clause}].",
-            secondary_policy,
-            f"KNOWLEDGE GRAPH CONSTRAINT: {category_constraint}",
-            special_lock,
-            perspective_constraint,
-            f"NEGATIVE PROMPT LOCK: {negative_lock}" if negative_lock else "",
-            f"SPATIAL GROUNDING: {grounding_prompt}.",
-            f"ENVIRONMENT & VIBE: {scene_environment}.",
-            f"LIGHTING & MATERIAL: {lighting_prompt}.",
-            props_instruction,
-            "Ensure realistic drop shadows, believable surface contact, and seamless commercial integration.",
-            "Ensure an elegant, high-end e-commerce commercial photography aesthetic with sufficient negative space for typography.",
-            NEGATIVE_SPACE_COMPOSITION_RULE,
-            base_prompt,
-            fragments["camera_fragment"],
-            fragments["style_fragment"],
-            quality_template,
-        ]
-        if fragment
-    )
+    return final_prompt, effective_sku_category, normalized_dynamic_props, effective_camera_perspective
 
 
 def _build_real_human_pose_edit_prompt(
@@ -769,7 +766,7 @@ def build_provider_payload(
             background_features=background_features,
         )
     else:
-        final_prompt = _build_scene_edit_prompt(
+        final_prompt, effective_scene_sku_category, effective_scene_dynamic_props, effective_scene_camera_perspective = _build_scene_edit_prompt(
             positive_template=positive_template,
             identity_lock=identity_lock,
             scene_variant_directive=scene_variant_directive,
@@ -787,6 +784,11 @@ def build_provider_payload(
             camera_perspective=camera_perspective,
             material_type=normalized_material_type,
         )
+        normalized_sku_category = effective_scene_sku_category
+        resolved_dynamic_props = effective_scene_dynamic_props
+        effective_camera_perspective_value = effective_scene_camera_perspective
+    if normalized_intent != "SCENE_EDIT":
+        effective_camera_perspective_value = _normalize_scene_text(camera_perspective)
 
     prompt_snapshot = {
         "intent": normalized_intent,
@@ -801,7 +803,7 @@ def build_provider_payload(
         "primary_sku_description": normalized_primary_sku_description,
         "secondary_props": normalized_secondary_props,
         "dynamic_props": resolved_dynamic_props if normalized_intent == "SCENE_EDIT" else [],
-        "camera_perspective": _normalize_scene_text(camera_perspective) if normalized_intent == "SCENE_EDIT" else "",
+        "camera_perspective": effective_camera_perspective_value if normalized_intent == "SCENE_EDIT" else "",
         "subject_features": subject_features if normalized_intent == "POSE_VARIATION" else "",
         "style_features": style_features if normalized_intent == "POSE_VARIATION" else "",
         "background_features": background_features if normalized_intent == "POSE_VARIATION" else "",
@@ -832,7 +834,7 @@ def build_provider_payload(
         "primary_sku_description": normalized_primary_sku_description,
         "secondary_props": normalized_secondary_props,
         "dynamic_props": resolved_dynamic_props if normalized_intent == "SCENE_EDIT" else [],
-        "camera_perspective": _normalize_scene_text(camera_perspective) if normalized_intent == "SCENE_EDIT" else "",
+        "camera_perspective": effective_camera_perspective_value if normalized_intent == "SCENE_EDIT" else "",
         "subject_features": subject_features if normalized_intent == "POSE_VARIATION" else "",
         "style_features": style_features if normalized_intent == "POSE_VARIATION" else "",
         "background_features": background_features if normalized_intent == "POSE_VARIATION" else "",

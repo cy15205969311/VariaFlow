@@ -15,7 +15,6 @@ from app.models.enums import BatchStatus, TaskStatus
 from app.models.tasks import BatchJob, GenerationTask
 from app.services.executor import process_generation_task
 
-
 DEFAULT_LEASE_SECONDS = 120
 DEFAULT_POLL_INTERVAL_SECONDS = 3.0
 
@@ -29,13 +28,6 @@ async def fetch_and_lock_next_generation_task(
     lease_owner: str = "scheduler",
     batch_id: int | None = None,
 ) -> GenerationTask | None:
-    """
-    以原子方式抓取并锁定一条可执行的生成任务。
-
-    这里使用 SELECT ... FOR UPDATE SKIP LOCKED，
-    允许多个工作协程并发竞争而不会拿到同一行任务。
-    """
-
     now = datetime.utcnow()
 
     statement = (
@@ -68,7 +60,47 @@ async def fetch_and_lock_next_generation_task(
     task.lease_until = now + timedelta(seconds=lease_seconds)
     task.next_run_at = None
 
-    # 立即提交租约状态，确保其他工作协程可以立刻看到这条任务已被占用。
+    await session.commit()
+    await session.refresh(task)
+    return task
+
+
+async def claim_generation_task_by_id(
+    session: AsyncSession,
+    task_id: int,
+    *,
+    lease_seconds: int = DEFAULT_LEASE_SECONDS,
+    lease_owner: str = "celery",
+) -> GenerationTask | None:
+    now = datetime.utcnow()
+    statement = (
+        select(GenerationTask)
+        .join(BatchJob, GenerationTask.batch_id == BatchJob.id)
+        .where(GenerationTask.id == task_id)
+        .where(BatchJob.status == BatchStatus.RUNNING)
+        .where(GenerationTask.status.in_([TaskStatus.PENDING, TaskStatus.RETRYING]))
+        .where(or_(GenerationTask.next_run_at.is_(None), GenerationTask.next_run_at <= now))
+        .limit(1)
+    )
+    if settings.db_supports_skip_locked:
+        statement = statement.with_for_update(skip_locked=True)
+    else:
+        statement = statement.with_for_update()
+
+    result = await session.execute(statement)
+    task = result.scalar_one_or_none()
+
+    if task is None:
+        await session.rollback()
+        return None
+
+    task.status = TaskStatus.PROCESSING
+    task.attempt_count += 1
+    task.processing_started_at = now
+    task.lease_owner = lease_owner
+    task.lease_until = now + timedelta(seconds=lease_seconds)
+    task.next_run_at = None
+
     await session.commit()
     await session.refresh(task)
     return task
@@ -88,13 +120,6 @@ def _handle_execution_task_done(background_task: asyncio.Task[None]) -> None:
 
 
 async def noop_task_processor(session: AsyncSession, task: GenerationTask) -> None:
-    """
-    兼容保留的临时安全处理器。
-
-    当前默认流程已经改为 `dispatch_generation_task -> process_generation_task`，
-    这里只保留一个可显式注入的降级处理器，方便调试或故障演练。
-    """
-
     logger.info("尚未配置任务处理器，任务将退回重试队列", extra={"task_id": task.id})
     task.status = TaskStatus.RETRYING
     task.next_run_at = datetime.utcnow()
@@ -123,13 +148,6 @@ async def run_scheduler_loop(
     worker_name: str = "scheduler",
     processor: TaskProcessor | None = None,
 ) -> None:
-    """
-    由 FastAPI lifespan 托管的长生命周期调度循环。
-
-    循环内部会捕获单次迭代错误并继续运行，
-    避免一次数据库异常或处理失败直接拖垮整个服务。
-    """
-
     task_processor = processor or dispatch_generation_task
 
     while True:
@@ -157,18 +175,23 @@ async def run_scheduler_loop(
 
 
 async def run_recovery_loop(*, poll_interval_seconds: float = 15.0) -> None:
-    """
-    长生命周期看门狗循环，用于回收租约过期的处理中任务。
-    """
-
-    from app.services.recovery import is_retryable_lock_error, recover_expired_tasks
+    from app.services.recovery import is_retryable_lock_error, recover_expired_task_ids, recover_expired_tasks
 
     while True:
         try:
             async with AsyncSessionLocal() as session:
-                recovered = await recover_expired_tasks(session)
-                if recovered:
-                    logger.warning("已回收租约过期任务", extra={"count": recovered})
+                if settings.async_execution_mode == "celery":
+                    recovered_ids = await recover_expired_task_ids(session)
+                    if recovered_ids:
+                        from app.services.async_tasks import enqueue_generation_task
+
+                        for recovered_task_id in recovered_ids:
+                            enqueue_generation_task(recovered_task_id)
+                        logger.warning("已回收租约过期任务并重新入队", extra={"count": len(recovered_ids)})
+                else:
+                    recovered = await recover_expired_tasks(session)
+                    if recovered:
+                        logger.warning("已回收租约过期任务", extra={"count": recovered})
             await asyncio.sleep(poll_interval_seconds)
         except asyncio.CancelledError:
             raise
