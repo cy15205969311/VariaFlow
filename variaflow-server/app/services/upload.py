@@ -35,7 +35,7 @@ class NormalizedImage:
 
 @dataclass(slots=True)
 class UploadBatchResult:
-    batch: BatchJob
+    batch_id: int
     generation_task_ids: list[int]
 
 
@@ -286,9 +286,10 @@ async def process_upload(file: UploadFile, session: AsyncSession) -> UploadBatch
         async with session.begin():
             session.add(batch)
             await session.flush()
+            batch_id = int(batch.id)
+            generation_task_ids = [int(task.id) for task in generation_task_refs if task.id is not None]
             batch.status = BatchStatus.RUNNING
             batch.scheduler_started_at = datetime.utcnow()
-        await session.refresh(batch)
     except Exception as exc:
         logger.exception(
             "批次写库失败",
@@ -305,5 +306,4 @@ async def process_upload(file: UploadFile, session: AsyncSession) -> UploadBatch
             detail=f"数据库初始化批次失败：{exc}",
         ) from exc
 
-    generation_task_ids = [task.id for task in generation_task_refs if task.id is not None]
-    return UploadBatchResult(batch=batch, generation_task_ids=generation_task_ids)
+    return UploadBatchResult(batch_id=batch_id, generation_task_ids=generation_task_ids)

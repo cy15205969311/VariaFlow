@@ -145,6 +145,7 @@ DOMAIN_CONSTRAINTS: dict[str, DomainConstraint] = {
         recommended_camera_perspective="top-down",
         physics_constraints="Must preserve realistic fabric folds, grounded wrinkles, and tight contact shadows directly around the garment edges.",
         allowed_props=("editorial magazine", "ceramic coffee cup", "dried floral accent", "delicate necklace", "perfume bottle"),
+        allow_dynamic_props=False,
     ),
     "apparel_hanging": DomainConstraint(
         sku_category="apparel_hanging",
@@ -161,13 +162,10 @@ DOMAIN_CONSTRAINTS: dict[str, DomainConstraint] = {
     ),
     "real_human_model": DomainConstraint(
         sku_category="real_human_model",
-        recommended_camera_perspective="match the original reference perspective exactly",
+        recommended_camera_perspective="low-angle",
         physics_constraints="Preserve full human body continuity, realistic stance, natural limb anatomy, and believable floor contact without amputating or floating body parts.",
-        negative_prompt=(
-            "ABSOLUTELY DO NOT add any new accessories, jewelry, bags, or props to the human model. "
-            "Strictly NO new accessories, NO extra jewelry, NO bags, NO watches, NO hats. "
-            "Preserve every pixel of the person and clothing."
-        ),
+        negative_prompt="No new accessories or extra objects on the model. Preserve the person and clothing exactly.",
+        perspective_lock="Low-angle shot from waist level, fashion photography style, visually elongating the model's legs and proportions.",
         allow_dynamic_props=False,
     ),
     "shoes_resting": DomainConstraint(
@@ -333,11 +331,17 @@ def resolve_camera_perspective(
     camera_perspective: str | None,
     sku_category: str | None,
 ) -> str:
+    normalized_sku_category = str(sku_category or "").strip().lower()
+    if normalized_sku_category == "real_human_model":
+        constraint = get_domain_constraint(normalized_sku_category)
+        if constraint and constraint.recommended_camera_perspective:
+            return constraint.recommended_camera_perspective
+
     normalized = " ".join(str(camera_perspective or "").split()).strip()
     if normalized:
         return normalized
 
-    constraint = get_domain_constraint(sku_category)
+    constraint = get_domain_constraint(normalized_sku_category)
     if constraint:
         return constraint.recommended_camera_perspective
     return DEFAULT_CAMERA_PERSPECTIVE
@@ -364,8 +368,11 @@ def build_camera_perspective_constraint(
     normalized_sku_category = str(sku_category or "").strip().lower()
     if normalized_sku_category == "shoes_resting":
         return f"The background must be generated from the same {resolved} perspective as the original product."
+    if normalized_sku_category == "real_human_model":
+        constraint = get_domain_constraint(normalized_sku_category)
+        return constraint.perspective_lock if constraint else ""
 
-    return f"Match the original reference camera perspective: {resolved}."
+    return ""
 
 
 def filter_dynamic_props(

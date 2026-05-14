@@ -14,6 +14,9 @@ request.interceptors.response.use(
     return response.data;
   },
   (error) => {
+    if (error?.config?.responseType === "blob") {
+      return Promise.reject(error);
+    }
     const detail =
       error?.response?.data?.detail ||
       error?.response?.data?.message ||

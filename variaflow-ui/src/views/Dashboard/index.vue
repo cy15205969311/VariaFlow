@@ -189,16 +189,58 @@ function formatStat(value) {
   return new Intl.NumberFormat("zh-CN").format(value || 0);
 }
 
+function getDownloadFilename(blobResponse, batchCode) {
+  const contentDisposition =
+    blobResponse?.headers?.["content-disposition"] || blobResponse?.headers?.["Content-Disposition"];
+  if (typeof contentDisposition === "string") {
+    const utf8Match = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i);
+    if (utf8Match?.[1]) {
+      return decodeURIComponent(utf8Match[1]);
+    }
+
+    const plainMatch = contentDisposition.match(/filename="?([^\";]+)"?/i);
+    if (plainMatch?.[1]) {
+      return plainMatch[1];
+    }
+  }
+
+  return `${batchCode || "variaflow_batch"}_outputs.zip`;
+}
+
 function triggerBrowserDownload(blobResponse, batchCode) {
   const blob = blobResponse.data;
   const downloadUrl = window.URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = downloadUrl;
-  link.download = `${batchCode || "variaflow_batch"}_outputs.zip`;
+  link.download = getDownloadFilename(blobResponse, batchCode);
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
   window.URL.revokeObjectURL(downloadUrl);
+}
+
+async function extractBlobErrorMessage(error) {
+  const fallbackMessage = "批次打包下载失败，请稍后重试";
+  const blob = error?.response?.data;
+  if (!(blob instanceof Blob)) {
+    return error?.response?.data?.detail || error?.message || fallbackMessage;
+  }
+
+  try {
+    const payload = await blob.text();
+    if (!payload) {
+      return fallbackMessage;
+    }
+
+    try {
+      const parsed = JSON.parse(payload);
+      return parsed?.detail || parsed?.message || fallbackMessage;
+    } catch {
+      return payload;
+    }
+  } catch {
+    return fallbackMessage;
+  }
 }
 
 async function handleDownloadBatch() {
@@ -211,6 +253,10 @@ async function handleDownloadBatch() {
     const response = await downloadBatchOutputs(batchStore.currentBatchId);
     triggerBrowserDownload(response, batchInfo.value?.batch_code);
     ElMessage.success("批次压缩包已开始下载");
+  } catch (error) {
+    const message = await extractBlobErrorMessage(error);
+    ElMessage.error(typeof message === "string" ? message : "批次打包下载失败，请稍后重试");
+    throw error;
   } finally {
     downloadingBatch.value = false;
   }

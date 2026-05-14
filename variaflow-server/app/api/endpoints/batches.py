@@ -15,14 +15,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db
 from app.core.config import settings
-from app.models.enums import BatchStatus, ExportStatus
-from app.models.tasks import BatchJob
+from app.models.enums import BatchStatus, ExportStatus, TaskStatus
+from app.models.tasks import BatchJob, GenerationTask
 from app.schemas.batches import BatchResponse
 from app.services.async_tasks import enqueue_generation_task
 from app.services.upload import process_upload
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+NO_DOWNLOADABLE_OUTPUTS_DETAIL = "当前批次暂无可下载输出。"
+UNSUPPORTED_ZIP_DETAIL = "文件类型不受支持，请上传 ZIP 压缩包。"
+BATCH_FETCH_FAILED_DETAIL = "批次已创建，但回读批次信息失败。"
+DOWNLOAD_NOT_READY_DETAIL = "当前批次尚未生成可下载图片，请稍后重试。"
+BATCH_NOT_FOUND_DETAIL = "未找到对应批次。"
 
 
 def _estimate_remaining_seconds(batch: BatchJob) -> int | None:
@@ -91,14 +97,52 @@ def _cleanup_export_path(path: str) -> None:
         logger.warning("Failed to cleanup export temp path", extra={"path": path})
 
 
-async def _build_batch_export_archive(batch: BatchJob) -> Path:
-    output_root = Path(batch.output_root_path or "")
-    if not output_root.exists():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="当前批次暂无可下载输出。")
+def _build_archive_member_name(output_file: Path, output_root: Path | None, generation_task: GenerationTask) -> str:
+    if output_root is not None:
+        try:
+            return output_file.relative_to(output_root).as_posix()
+        except ValueError:
+            pass
 
-    output_files = sorted(file_path for file_path in output_root.rglob("*") if file_path.is_file())
+    if generation_task.output_file_name:
+        return generation_task.output_file_name
+
+    if output_file.parent.name:
+        return f"{output_file.parent.name}/{output_file.name}"
+
+    return output_file.name
+
+
+async def _build_batch_export_archive(batch: BatchJob, session: AsyncSession) -> Path:
+    output_root = Path(batch.output_root_path).resolve(strict=False) if batch.output_root_path else None
+    result = await session.execute(
+        select(GenerationTask)
+        .where(
+            GenerationTask.batch_id == batch.id,
+            GenerationTask.status.in_((TaskStatus.SUCCESS, TaskStatus.FALLBACK_SUCCESS)),
+            GenerationTask.output_path.is_not(None),
+        )
+        .order_by(GenerationTask.source_task_id, GenerationTask.variant_index, GenerationTask.id)
+    )
+    generation_tasks = result.scalars().all()
+
+    output_files: list[tuple[Path, str]] = []
+    for generation_task in generation_tasks:
+        output_path = Path(generation_task.output_path or "")
+        if not output_path.is_file():
+            logger.warning(
+                "Skip missing generation output during export",
+                extra={
+                    "batch_id": batch.id,
+                    "generation_task_id": generation_task.id,
+                    "output_path": generation_task.output_path,
+                },
+            )
+            continue
+        output_files.append((output_path, _build_archive_member_name(output_path, output_root, generation_task)))
+
     if not output_files:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="当前批次暂无可下载输出。")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=NO_DOWNLOADABLE_OUTPUTS_DETAIL)
 
     await asyncio.to_thread(settings.export_temp_root.mkdir, parents=True, exist_ok=True)
     export_temp_dir = Path(tempfile.mkdtemp(prefix=f"{batch.batch_code}_", dir=str(settings.export_temp_root)))
@@ -106,8 +150,8 @@ async def _build_batch_export_archive(batch: BatchJob) -> Path:
 
     def _write_archive() -> None:
         with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-            for output_file in output_files:
-                archive.write(output_file, arcname=output_file.relative_to(output_root).as_posix())
+            for output_file, archive_name in output_files:
+                archive.write(output_file, arcname=archive_name)
 
     await asyncio.to_thread(_write_archive)
     return archive_path
@@ -121,7 +165,7 @@ async def upload_batch_zip(
     if file.content_type not in {"application/zip", "application/x-zip-compressed", "multipart/x-zip"}:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="文件类型不受支持，请上传 ZIP 压缩包。",
+            detail=UNSUPPORTED_ZIP_DETAIL,
         )
 
     try:
@@ -129,7 +173,16 @@ async def upload_batch_zip(
         if settings.async_execution_mode == "celery":
             for task_id in upload_result.generation_task_ids:
                 enqueue_generation_task(task_id)
-        return _to_batch_response(upload_result.batch)
+
+        batch = (
+            await session.execute(select(BatchJob).where(BatchJob.id == upload_result.batch_id))
+        ).scalar_one_or_none()
+        if batch is None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=BATCH_FETCH_FAILED_DETAIL,
+            )
+        return _to_batch_response(batch)
     except HTTPException:
         logger.exception(
             "ZIP解析或任务创建失败",
@@ -159,7 +212,7 @@ async def get_batch(batch_id: int, session: AsyncSession = Depends(get_db)) -> B
     batch = result.scalar_one_or_none()
 
     if batch is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="未找到对应批次。")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=BATCH_NOT_FOUND_DETAIL)
 
     return _to_batch_response(batch)
 
@@ -174,12 +227,12 @@ async def download_batch_outputs(
     batch = result.scalar_one_or_none()
 
     if batch is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="未找到对应批次。")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=BATCH_NOT_FOUND_DETAIL)
 
     if not _download_ready(batch):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="当前批次尚未生成可下载图片，请稍后重试。",
+            detail=DOWNLOAD_NOT_READY_DETAIL,
         )
 
     batch.export_status = ExportStatus.PROCESSING
@@ -187,7 +240,7 @@ async def download_batch_outputs(
     await session.commit()
 
     try:
-        archive_path = await _build_batch_export_archive(batch)
+        archive_path = await _build_batch_export_archive(batch, session)
     except Exception:
         batch.export_status = ExportStatus.FAILED
         await session.commit()

@@ -174,37 +174,27 @@ async def _prepare_execution_context(
     payload["vision_route_reason"] = vision_decision.reason
     payload["provider_hint"] = _resolve_provider_hint_for_route(
         vision_decision.intent,
-        vision_decision.sku_category,
+        payload.get("sku_category"),
     )
     payload["subject_type"] = vision_decision.subject_type
-    payload["sku_category"] = vision_decision.sku_category
     payload["material_type"] = vision_decision.material_type
-    payload["suggested_scene"] = vision_decision.suggested_scene
-    payload["suggested_scene_recipe"] = vision_decision.suggested_scene_recipe
     payload["dynamic_spatial_anchor"] = vision_decision.dynamic_spatial_anchor
     payload["dynamic_lighting_needs"] = vision_decision.dynamic_lighting_needs
     payload["primary_sku_description"] = vision_decision.primary_sku_description
     payload["secondary_props"] = vision_decision.secondary_props
-    payload["dynamic_props"] = vision_decision.dynamic_props or []
-    payload["camera_perspective"] = vision_decision.camera_perspective
     payload["subject_features"] = vision_decision.subject_features
     payload["style_features"] = vision_decision.style_features
     payload["background_features"] = vision_decision.background_features
     payload["vision_route_used_fallback"] = vision_decision.used_fallback
-    prompt_snapshot["suggested_scene"] = vision_decision.suggested_scene
-    prompt_snapshot["suggested_scene_recipe"] = vision_decision.suggested_scene_recipe
     prompt_snapshot["subject_type"] = vision_decision.subject_type
     prompt_snapshot["dynamic_spatial_anchor"] = vision_decision.dynamic_spatial_anchor
     prompt_snapshot["dynamic_lighting_needs"] = vision_decision.dynamic_lighting_needs
     prompt_snapshot["material_type"] = vision_decision.material_type
     prompt_snapshot["primary_sku_description"] = vision_decision.primary_sku_description
     prompt_snapshot["secondary_props"] = vision_decision.secondary_props
-    prompt_snapshot["dynamic_props"] = vision_decision.dynamic_props or []
-    prompt_snapshot["camera_perspective"] = vision_decision.camera_perspective
     prompt_snapshot["subject_features"] = vision_decision.subject_features
     prompt_snapshot["style_features"] = vision_decision.style_features
     prompt_snapshot["background_features"] = vision_decision.background_features
-    prompt_snapshot["sku_category"] = vision_decision.sku_category
     prompt_snapshot["vision_router"] = {
         "intent": vision_decision.intent,
         "reason": vision_decision.reason,

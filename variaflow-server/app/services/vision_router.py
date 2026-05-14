@@ -85,6 +85,7 @@ VISION_SYSTEM_PROMPT = (
     "For SCENE_EDIT, dynamic_spatial_prompt and dynamic_lighting_prompt must be concrete, production-ready instructions rather than abstract commentary. "
     "For SCENE_EDIT, dynamic_props must be a JSON array containing zero to two complementary ecommerce styling props that enhance conversion without replacing the product. "
     "dynamic_props should contain generic commercially useful prop suggestions such as tactile materials, paper goods, ceramic accents, ribbons, stone accents, or editorial lifestyle details, and should avoid overly specific branded objects. "
+    "For apparel flat lays and human models, DO NOT suggest any props. Keep the background absolutely clean to focus purely on the clothing silhouette. "
     "For SCENE_EDIT, material_type must capture the dominant physical material category that will drive lighting, reflections, and physics realism. "
     "camera_perspective must be a short English label such as top-down, 45-degree angle, eye-level, or low-angle. "
     "For apparel_flat, prefer top-down. For apparel_hanging, prefer eye-level. For apparel_leaning, prefer angular side-view such as 30-to-45-degree angle. For shoes_resting, capture the exact low-angle or side angle from the original reference. "
@@ -238,6 +239,19 @@ def _normalize_dynamic_props(value: Any, intent: str) -> list[str]:
         if len(normalized_props) >= 2:
             break
     return normalized_props
+
+
+def _enforce_clean_background_dynamic_props(
+    *,
+    intent: str,
+    sku_category: str,
+    dynamic_props: list[str] | None,
+) -> list[str]:
+    if intent != INTENT_SCENE_EDIT:
+        return []
+    if sku_category in {"apparel_flat", "real_human_model"}:
+        return []
+    return list(dynamic_props or [])
 
 
 def _normalize_material_type(value: Any, intent: str, primary_sku_description: str = "", sku_category: str = "") -> str:
@@ -479,6 +493,11 @@ async def analyze_image_intent(
             primary_sku_description=primary_sku_description,
             dynamic_spatial_anchor=dynamic_spatial_anchor,
             camera_perspective=camera_perspective,
+        )
+        dynamic_props = _enforce_clean_background_dynamic_props(
+            intent=intent,
+            sku_category=sku_category,
+            dynamic_props=dynamic_props,
         )
         return VisionRouteDecision(
             intent=intent,

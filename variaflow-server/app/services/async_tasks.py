@@ -7,7 +7,7 @@ from celery.exceptions import SoftTimeLimitExceeded
 
 from app.core.celery_app import celery_app
 from app.core.config import settings
-from app.core.database import AsyncSessionLocal
+from app.core.database import AsyncSessionLocal, create_null_pool_session_factory, engine
 from app.services.executor import process_generation_task
 from app.services.scheduler import claim_generation_task_by_id
 
@@ -37,40 +37,47 @@ def _calculate_requeue_countdown(task_row) -> int:
 )
 def generate_task_async(self, task_id: int) -> dict[str, object]:
     async def _runner() -> dict[str, object]:
-        async with AsyncSessionLocal() as session:
-            claimed_task = await claim_generation_task_by_id(
-                session,
-                task_id,
-                lease_seconds=settings.worker_lease_seconds,
-                lease_owner=f"celery:{self.request.hostname or 'worker'}",
-            )
+        worker_engine, worker_session_factory = create_null_pool_session_factory()
+        try:
+            async with worker_session_factory() as session:
+                claimed_task = await claim_generation_task_by_id(
+                    session,
+                    task_id,
+                    lease_seconds=settings.worker_lease_seconds,
+                    lease_owner=f"celery:{self.request.hostname or 'worker'}",
+                )
 
-        if claimed_task is None:
-            logger.info("Skip celery dispatch because task is not claimable", extra={"task_id": task_id})
-            return {"task_id": task_id, "dispatched": False, "reason": "not_claimable"}
+            if claimed_task is None:
+                logger.info("Skip celery dispatch because task is not claimable", extra={"task_id": task_id})
+                return {"task_id": task_id, "dispatched": False, "reason": "not_claimable"}
 
-        await process_generation_task(task_id, AsyncSessionLocal)
+            await process_generation_task(task_id, worker_session_factory)
 
-        async with AsyncSessionLocal() as session:
-            from app.models.enums import TaskStatus
-            from app.models.tasks import GenerationTask
-            from sqlalchemy import select
+            async with worker_session_factory() as session:
+                from app.models.enums import TaskStatus
+                from app.models.tasks import GenerationTask
+                from sqlalchemy import select
 
-            task_row = (
-                await session.execute(select(GenerationTask).where(GenerationTask.id == task_id))
-            ).scalar_one_or_none()
+                task_row = (
+                    await session.execute(select(GenerationTask).where(GenerationTask.id == task_id))
+                ).scalar_one_or_none()
 
-            if task_row and task_row.status == TaskStatus.RETRYING:
-                next_eta_seconds = _calculate_requeue_countdown(task_row)
-                enqueue_generation_task(task_id, countdown=next_eta_seconds)
-                return {
-                    "task_id": task_id,
-                    "dispatched": True,
-                    "status": task_row.status.value,
-                    "requeued": True,
-                    "countdown": next_eta_seconds,
-                }
+                if task_row and task_row.status == TaskStatus.RETRYING:
+                    next_eta_seconds = _calculate_requeue_countdown(task_row)
+                    enqueue_generation_task(task_id, countdown=next_eta_seconds)
+                    return {
+                        "task_id": task_id,
+                        "dispatched": True,
+                        "status": task_row.status.value,
+                        "requeued": True,
+                        "countdown": next_eta_seconds,
+                    }
 
-        return {"task_id": task_id, "dispatched": True, "requeued": False}
+            return {"task_id": task_id, "dispatched": True, "requeued": False}
+        finally:
+            await worker_engine.dispose()
+            # Celery runs each task inside its own asyncio.run() event loop. Clearing the
+            # shared pool here prevents aiomysql connections from leaking across loops.
+            await engine.dispose()
 
     return asyncio.run(_runner())

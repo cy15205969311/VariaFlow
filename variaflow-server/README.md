@@ -39,8 +39,14 @@
 行为：
 
 - 仅打包当前批次已成功落盘的输出图片。
+- 仅收录 `generation_task.status` 为 `success` 或 `fallback_success` 且文件实际存在的输出，自动跳过失败任务和缺失文件。
 - 服务端临时生成 ZIP 后通过 `FileResponse` 返回。
 - 下载完成后自动清理临时 ZIP 和临时目录，避免磁盘堆积。
+
+实现细节：
+
+- 归档来源不是简单扫描 `output_root_path`，而是以数据库中的 `GenerationTask.output_path` 为准，避免把失败残留文件或无关临时文件打进压缩包。
+- 归档过程使用 `zipfile` 直接写文件路径，不会先把所有图片载入内存，适合大批量高清图下载。
 
 ### 4. 手动重试与恢复循环联动
 
@@ -113,6 +119,22 @@ uvicorn app.main:app --reload
 ```powershell
 celery -A worker.celery_app worker --loglevel=info
 ```
+
+### 3.1 Celery 数据库隔离
+
+当前 Worker 侧已采用 `NullPool` + 任务级会话工厂，专门规避 Windows + `asyncio.run()` + `aiomysql` 场景下的跨事件循环连接污染问题。
+
+如果看到类似以下错误，说明没有使用隔离会话：
+
+```text
+AttributeError: 'NoneType' object has no attribute 'send'
+```
+
+当前修复策略：
+
+- Celery 任务使用独立 `worker_session_factory`
+- Worker 侧异步引擎使用 `NullPool`
+- 任务结束后补充 `dispose()` 清理
 
 ### 4. 健康检查
 

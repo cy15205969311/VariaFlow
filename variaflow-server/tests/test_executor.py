@@ -359,7 +359,7 @@ async def test_scene_edit_uses_transparent_preprocessing_for_openai_edit(
     assert captured_payloads[0]["dynamic_lighting_needs"] == "Use cozy warm editorial lighting with soft window highlights and gentle fabric shadow transitions."
     assert captured_payloads[0]["primary_sku_description"] == "white oversized hoodie"
     assert captured_payloads[0]["secondary_props"] == "beige scarf, coffee mug"
-    assert captured_payloads[0]["dynamic_props"] == ["soft knit textile accent", "warm ceramic accent"]
+    assert captured_payloads[0]["dynamic_props"] == []
     assert captured_payloads[0]["camera_perspective"] == "top-down"
     assert captured_payloads[0]["source_image_preprocessed"] is True
     assert captured_payloads[0]["source_image_background_removed"] is True
@@ -473,8 +473,8 @@ async def test_scene_edit_real_human_model_passes_background_mask_to_openai_edit
     assert captured_payloads[0]["source_image_mask_generated"] is True
     assert captured_payloads[0]["source_image_canvas_padded"] is False
     assert captured_payloads[0]["source_image_mask_name"] == "human_mask.png"
-    assert captured_payloads[0]["dynamic_props"] == ["linen editorial card"]
-    assert captured_payloads[0]["camera_perspective"] == "eye-level"
+    assert captured_payloads[0]["dynamic_props"] == []
+    assert captured_payloads[0]["camera_perspective"] == "low-angle"
     assert isinstance(captured_payloads[0]["mask_image_bytes"], bytes)
     assert captured_payloads[0]["mask_image_name"] == "human_mask.png"
     assert "source" in generated_paths
